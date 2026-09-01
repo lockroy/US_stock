@@ -1,6 +1,23 @@
 # 版本記錄 (Changelog)
 
-## v0.5.0 — 2026-09-01（修復 Worker 名稱不匹配）
+## v0.5.1 — 2026-09-01（修復 v0.5.0 的 lock 檔案損壞）
+
+**狀態**：✅ 已修復並三重驗證（npm ci / cf:build / zip 內終極驗證）
+
+**v0.5.0 的缺陷（本次修復）**：
+- v0.5.0 打包時用 `sed` 全局替換版本號，誤傷了 lock 檔案中恰好是 0.4.0 版本的依賴包（`asynckit`、`@cloudflare/kv-asset-handler`），導致 `npm ci` 報「Missing: asynckit@0.4.0」
+- 本版用 `npm install` 重新生成乾淨 lock，版本號改用 npm 官方命令 `npm version` 更新
+
+**修復後驗證**：
+- ✅ `npm ci`（部署平台同款命令）通過
+- ✅ `npm run cf:build` 生成 worker.js 成功
+- ✅ 從 zip 解出檔案再跑 `npm ci --dry-run` 通過（終極保險）
+
+**含 v0.5.0 的全部修復**：Worker 名稱 `us-stock`、REAL_DATA=false
+
+---
+
+## v0.5.0 — 2026-09-01（修復 Worker 名稱不匹配）⚠️ 有 lock 損壞缺陷，請用 v0.5.1
 
 **狀態**：✅ build 成功、部署配置修正（最後一步）
 
