@@ -1,5 +1,20 @@
 # 版本記錄 (Changelog)
 
+## v0.5.0 — 2026-09-01（修復 Worker 名稱不匹配）
+
+**狀態**：✅ build 成功、部署配置修正（最後一步）
+
+**變更**：
+- 修復 `wrangler.jsonc` 的 Worker 名稱不匹配：
+  - `name` 從 `us-stock-analyzer` → `us-stock`（與 Cloudflare 上的 Worker 名稱一致）
+  - `WORKER_SELF_REFERENCE` 的 `service` 同步改為 `us-stock`
+  - 根因：Cloudflare 上的 Worker 叫 `us-stock`，但配置寫 `us-stock-analyzer`，導致 service binding 找不到目標（error 10143）
+- `REAL_DATA` 改為 `false`（Free 方案先跑通流程，避免 CPU 超時）
+
+**部署後驗證**：build 階段已確認成功（`Worker saved in .open-next/worker.js`），此版應可完整部署。
+
+---
+
 ## v0.4.0 — 2026-09-01（修復部署命令）
 
 **狀態**：⚠️ 修復部署階段的 build 命令問題

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "us-stock-analyzer",
+  "name": "us-stock",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": [
@@ -16,14 +16,14 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "us-stock-analyzer"
+      "service": "us-stock"
     }
   ],
   "observability": {
     "enabled": true
   },
   "vars": {
-    "REAL_DATA": "true",
+    "REAL_DATA": "false",
     "FUTU_API_BASE": "https://openapi.futunn.com",
     "NEWS_PROVIDER": "finnhub"
   }
