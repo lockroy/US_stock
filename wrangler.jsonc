@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "us-stock-analyzer",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": [
+    // 啟用 Node.js API 相容
+    "nodejs_compat",
+    // 允許 Worker fetch 外部 URL（Nasdaq API）
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "us-stock-analyzer"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "REAL_DATA": "true",
+    "FUTU_API_BASE": "https://openapi.futunn.com",
+    "NEWS_PROVIDER": "finnhub"
+  }
+}
