@@ -1,4 +1,4 @@
-import type { StockReport, Candle, Financials, Valuation, Ratings, NewsItem } from "../types";
+import type { StockReport, Candle, Financials, Valuation, Ratings, NewsItem, Quote, DataSource } from "../types";
 import { computeIndicators } from "../indicators/indicators";
 import { score } from "../scoring/scoring";
 import { buildMemo, buildPlan, buildRules, audit, findBuyPoints } from "../fable/fable";
@@ -17,14 +17,10 @@ export function hasFutuCreds(): boolean {
   return !!CLIENT_ID && !!CLIENT_SECRET;
 }
 
-// 真實富途調用骨架（憑證到手後啟用）。目前返回 null 觸發 mock 兜底。
+// 真實富途調用骨架（憑證到手後啟用）。目前返回 null 觸發 fallback。
 async function futuGet<T>(_path: string): Promise<T | null> {
   if (!hasFutuCreds()) return null;
   // TODO: OAuth 2.1 取 token → GET `${FUTU_API_BASE}${_path}`
-  // const token = await getToken();
-  // const res = await fetch(`${FUTU_API_BASE}${_path}`, { headers: { Authorization: `Bearer ${token}` } });
-  // if (!res.ok) return null;
-  // return res.json() as Promise<T>;
   return null;
 }
 
@@ -32,43 +28,73 @@ function toUsSymbol(symbol: string): string {
   return symbol.toUpperCase().startsWith("US.") ? symbol.toUpperCase() : `US.${symbol.toUpperCase()}`;
 }
 
-// 彙整完整報告（mock 或真實）
+// 彙整完整報告（真實 Nasdaq 優先，逐項 fallback 並標註來源）
 export async function buildReport(rawSymbol: string): Promise<StockReport> {
   const symbol = toUsSymbol(rawSymbol);
+  const sources: Record<string, DataSource> = {};
 
-  // 1) 日線：真實 Nasdaq 歷史數據優先，失敗才 mock
-  const realDaily = REAL_DATA ? await nasdaq.fetchDaily(symbol) : null;
-  const daily = realDaily || (await futuGet<Candle[]>(`/quote-api/candles?symbol=${symbol}&range=day`)) || mock.mockDailyCandles(symbol);
+  // ---- 第一波：並行拉取 Nasdaq（行情/日線/摘要/財務/大盤）----
+  const [realQuote, realDaily, summary, finRaw, spyTrend] = REAL_DATA
+    ? await Promise.all([
+        nasdaq.fetchQuote(symbol),
+        nasdaq.fetchDaily(symbol),
+        nasdaq.fetchSummary(symbol),
+        nasdaq.fetchFinancials(symbol),
+        nasdaq.fetchSpyTrend(),
+      ])
+    : [null, null, null, null, null];
 
-  // 2) 報價：真實 Nasdaq 優先
-  const realQuote = REAL_DATA ? await nasdaq.fetchQuote(symbol) : null;
-  const quote = realQuote || (await futuGet<import("../types").Quote>(`/quote-api/quote?symbol=${symbol}`)) || mock.mockQuote(symbol);
+  // ---- 逐項組裝（真實優先，mock 兜底）----
+  const quote: Quote = realQuote || mock.mockQuote(symbol);
+  sources.quote = realQuote ? "nasdaq" : "mock";
 
-  // 3) 日內：無穩定免費源，用日線降級成「日內圖」（按日收盤畫）
+  const daily: Candle[] = realDaily || mock.mockDailyCandles(symbol);
+  sources.candlesDaily = realDaily ? "nasdaq" : "mock";
+
+  // 財務：Nasdaq 年報四表
+  const financials: Financials = finRaw?.fin || mock.mockFinancials(symbol);
+  sources.financials = finRaw ? "nasdaq" : "mock";
+
+  // 估值：市值 + 財務推導（PE/PEG/PB/PS/FCF yield/EV-Sales）
+  const derivedVal = summary && finRaw ? nasdaq.deriveValuation(summary.marketCap, finRaw) : null;
+  const valuation: Valuation = derivedVal || mock.mockValuation(symbol);
+  sources.valuation = derivedVal ? "derived" : "mock";
+
+  // 日內：Nasdaq 無分時 → 日線降級（按日收盤畫）
   const intraday =
     (await futuGet<Candle[]>(`/quote-api/candles?symbol=${symbol}&range=1D`)) ||
     daily.slice(-60).map((c) => ({ ...c, open: c.close, high: c.close, low: c.close }));
+  sources.candlesIntraday = "mock";
 
-  // 4) 財務/估值/評級/新聞：Nasdaq 免費接口無此數據，用估算兜底並標註來源
-  const financials = (await futuGet<Financials>(`/quote-api/financials?symbol=${symbol}`)) || mock.mockFinancials(symbol);
-  const valuation = (await futuGet<Valuation>(`/quote-api/valuation?symbol=${symbol}`)) || mock.mockValuation(symbol);
-  const ratings = (await futuGet<Ratings>(`/quote-api/ratings?symbol=${symbol}`)) || mock.mockRatings(symbol);
-  const news = (await futuGet<NewsItem[]>(`/quote-api/news?symbol=${symbol}`)) || mock.mockNews(symbol);
+  // 評級/新聞：無穩定免費源 → mock 標註（待接 Finnhub key 或富途）
+  const ratings: Ratings = (await futuGet<Ratings>(`/quote-api/ratings?symbol=${symbol}`)) || mock.mockRatings(symbol);
+  sources.ratings = "mock";
+  const news: NewsItem[] = (await futuGet<NewsItem[]>(`/quote-api/news?symbol=${symbol}`)) || mock.mockNews(symbol);
+  sources.news = "mock";
 
+  // ---- 第二波：產業相對強弱（依賴 summary.sector）----
+  const sectorStrong = (REAL_DATA && summary ? await nasdaq.fetchSectorStrength(summary.sector) : null) ?? true;
+  sources.sectorStrong = sectorStrong === null ? "proxy" : "nasdaq";
+  const marketTrendUp = spyTrend ?? true;
+  sources.marketTrendUp = spyTrend === null ? "proxy" : "nasdaq";
+
+  // ---- 純計算層（本地推導，不吃外部數據）----
   const indicators = computeIndicators(daily);
   const scoreResult = score({
     financials,
     valuation,
     ratings,
     indicators,
-    marketTrendUp: true, // 代理：SPY 均線多空（MVP 預設多頭，待接大盤數據）
-    sectorStrong: true, // 代理：產業相對強弱（MVP 預設強，待接產業 ETF）
+    marketTrendUp,
+    sectorStrong,
   });
   const memo = buildMemo(indicators, daily);
   const plan = buildPlan(indicators, daily);
   const rules = buildRules(memo);
   const auditResult = audit(scoreResult, memo, plan);
   const buyPoints = findBuyPoints(daily);
+  sources.indicators = "derived";
+  sources.scoring = "derived";
 
   return {
     quote: quote as StockReport["quote"],
@@ -81,6 +107,7 @@ export async function buildReport(rawSymbol: string): Promise<StockReport> {
     news: news as StockReport["news"],
     candlesDaily: daily,
     candlesIntraday: intraday,
+    sources,
   };
 }
 

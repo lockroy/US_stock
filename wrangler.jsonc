@@ -23,7 +23,7 @@
     "enabled": true
   },
   "vars": {
-    "REAL_DATA": "false",
+    "REAL_DATA": "true",
     "FUTU_API_BASE": "https://openapi.futunn.com",
     "NEWS_PROVIDER": "finnhub"
   }

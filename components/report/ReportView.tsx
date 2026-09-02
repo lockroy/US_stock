@@ -11,6 +11,33 @@ const tierColor: Record<string, string> = {
   避開: "#ef4444",
 };
 
+// 數據來源標籤
+const SOURCE_LABEL: Record<string, string> = {
+  nasdaq: "Nasdaq 真實",
+  derived: "推導計算",
+  mock: "模擬數據",
+  proxy: "代理假設",
+};
+const SOURCE_COLOR: Record<string, string> = {
+  nasdaq: "#22c55e",
+  derived: "#58a6ff",
+  mock: "#f59e0b",
+  proxy: "#8b949e",
+};
+const SOURCE_KEY_LABEL: Record<string, string> = {
+  quote: "報價",
+  candlesDaily: "日線",
+  candlesIntraday: "分時",
+  financials: "財務",
+  valuation: "估值",
+  ratings: "評級",
+  news: "新聞",
+  marketTrendUp: "大盤",
+  sectorStrong: "產業",
+  indicators: "指標",
+  scoring: "評分",
+};
+
 function Block({ n, title, fable, children }: { n: number; title: string; fable?: boolean; children: React.ReactNode }) {
   return (
     <section className="card p-4 mb-4">
@@ -58,6 +85,22 @@ function ReportView({ symbol }: { symbol: string }) {
           </div>
           <div className="text-muted text-sm ml-auto">成交量 {r.quote.volume.toLocaleString()}</div>
         </div>
+        {/* 數據來源標註（透明化：每項數據實際從哪裡來） */}
+        {r.sources && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] text-muted">數據來源：</span>
+            {Object.entries(r.sources).map(([k, v]) => (
+              <span
+                key={k}
+                className="text-[10px] px-1.5 py-0.5 rounded-full border"
+                style={{ color: SOURCE_COLOR[v], borderColor: `${SOURCE_COLOR[v]}55` }}
+                title={`${SOURCE_KEY_LABEL[k] || k}：${SOURCE_LABEL[v] || v}`}
+              >
+                {SOURCE_KEY_LABEL[k] || k}·{SOURCE_LABEL[v] || v}
+              </span>
+            ))}
+          </div>
+        )}
       </Block>
 
       {/* 2 評分總覽 */}

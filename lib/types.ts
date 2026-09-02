@@ -137,6 +137,8 @@ export interface BuyPoint {
   reason: string;
 }
 
+export type DataSource = "nasdaq" | "mock" | "derived" | "proxy";
+
 // 完整報告
 export interface StockReport {
   quote: Quote;
@@ -149,4 +151,5 @@ export interface StockReport {
   news: NewsItem[];
   candlesDaily: Candle[];
   candlesIntraday: Candle[];
+  sources: Record<string, DataSource>; // 各數據塊實際來源（nasdaq=真實/mock=模擬/derived=推導/proxy=代理）
 }
