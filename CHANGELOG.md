@@ -1,5 +1,20 @@
 # 版本記錄 (Changelog)
 
+## v0.6.1 — 2026-09-08（UI 升級：fact-check 數據溯源）
+
+**狀態**：✅ 純前端改動，無後端變更
+
+**核心變更**——把 v0.6.0 已有的「來源標籤」升級為可 fact-check 的「源頭出處明細」：
+
+1. **新增 `SOURCE_PROVENANCE` 常數**：11 個 key 對應每個數據區塊的具體源頭（檔案路徑 + 函式 + 端點）
+2. **標籤 hover tooltip 增強**：彩色標籤滑鼠移上去顯示完整出處（例：`lib/futu/nasdaq.ts → fetchQuote()｜Nasdaq /api/quote/AAPL/info`）
+3. **新增可展開明細區塊**：報價頭下方加一個 `<details>`，預設展開，列出 11 項數據各自的 `名稱 · 類型 · 源頭路徑`
+4. **純前端改動**：只動 `components/report/ReportView.tsx`（+23 行），不影響後端 API、不改 types 結構、不破壞既有配色（綠=Nasdaq 真實 / 藍=推導 / 黃=模擬 / 灰=代理）
+
+**使用者價值**：使用者可一目了然知道每個數據從哪個 API/函式來，方便逐項 fact-check（例如：股價 → Nasdaq /api/quote/{t}/info、圖表 → Nasdaq /api/quote/{t}/historical、新聞 → 目前為 mock）
+
+---
+
 ## v0.6.0 — 2026-09-01（數據層升級：接入真實數據）
 
 **狀態**：✅ 端到端驗證通過（AAPL 81 分 / NVDA 88 分，真實數據全鏈路）

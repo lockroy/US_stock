@@ -38,6 +38,22 @@ const SOURCE_KEY_LABEL: Record<string, string> = {
   scoring: "評分",
 };
 
+// 每個數據區塊的「源頭出處」說明（給 fact-check 用）
+// key 對應 sources 的 key，value 是給人讀的中文說明，標示從哪個檔/端點來的
+const SOURCE_PROVENANCE: Record<string, string> = {
+  quote: "lib/futu/nasdaq.ts → fetchQuote()｜Nasdaq /api/quote/{t}/info",
+  candlesDaily: "lib/futu/nasdaq.ts → fetchDaily()｜Nasdaq /api/quote/{t}/historical",
+  candlesIntraday: "lib/futu/mock.ts → fetchIntraday()｜目前無真實源，以日線收盤價模擬",
+  financials: "lib/futu/nasdaq.ts → fetchFinancials()｜Nasdaq /api/company/{t}/financials",
+  valuation: "lib/futu/nasdaq.ts → buildValuation()｜市值÷財務數字推導",
+  ratings: "lib/futu/mock.ts → fetchRatings()｜無免費真實源，種子隨機生成",
+  news: "lib/futu/mock.ts → fetchNews()｜無免費真實源，種子隨機生成",
+  marketTrendUp: "lib/futu/nasdaq.ts → fetchEtfDaily(SPY)｜Nasdaq /api/quote/SPY/historical",
+  sectorStrong: "lib/futu/nasdaq.ts → fetchEtfDaily(sector ETF)｜Nasdaq /api/quote/{ETF}/historical",
+  indicators: "lib/indicators/indicators.ts｜由 candlesDaily 本地計算（EMA/RSI/MACD/KD/布林/ATR/VWAP）",
+  scoring: "lib/scoring/scoring.ts｜本地評分模型（基本面30+估值20+技術30+情緒20=100）",
+};
+
 function Block({ n, title, fable, children }: { n: number; title: string; fable?: boolean; children: React.ReactNode }) {
   return (
     <section className="card p-4 mb-4">
@@ -87,18 +103,37 @@ function ReportView({ symbol }: { symbol: string }) {
         </div>
         {/* 數據來源標註（透明化：每項數據實際從哪裡來） */}
         {r.sources && (
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] text-muted">數據來源：</span>
-            {Object.entries(r.sources).map(([k, v]) => (
-              <span
-                key={k}
-                className="text-[10px] px-1.5 py-0.5 rounded-full border"
-                style={{ color: SOURCE_COLOR[v], borderColor: `${SOURCE_COLOR[v]}55` }}
-                title={`${SOURCE_KEY_LABEL[k] || k}：${SOURCE_LABEL[v] || v}`}
-              >
-                {SOURCE_KEY_LABEL[k] || k}·{SOURCE_LABEL[v] || v}
-              </span>
-            ))}
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted">數據來源：</span>
+              {Object.entries(r.sources).map(([k, v]) => (
+                <span
+                  key={k}
+                  className="text-[10px] px-1.5 py-0.5 rounded-full border cursor-help"
+                  style={{ color: SOURCE_COLOR[v], borderColor: `${SOURCE_COLOR[v]}55` }}
+                  title={`${SOURCE_KEY_LABEL[k] || k}：${SOURCE_LABEL[v] || v}\n出處：${SOURCE_PROVENANCE[k] || "未記錄"}`}
+                >
+                  {SOURCE_KEY_LABEL[k] || k}·{SOURCE_LABEL[v] || v}
+                </span>
+              ))}
+            </div>
+            {/* Fact-check 出處明細：每一行對應一個數據區塊 */}
+            <details className="text-[11px] text-muted">
+              <summary className="cursor-pointer hover:text-accent">📋 點此查看每個數據的詳細出處（fact-check 用）</summary>
+              <ul className="mt-2 space-y-1 pl-2 border-l border-line">
+                {Object.entries(r.sources).map(([k, v]) => (
+                  <li key={k} className="leading-relaxed">
+                    <span className="font-medium" style={{ color: SOURCE_COLOR[v] }}>
+                      {SOURCE_KEY_LABEL[k] || k}
+                    </span>
+                    <span className="text-muted"> · </span>
+                    <span>{SOURCE_LABEL[v] || v}</span>
+                    <span className="text-muted"> · </span>
+                    <span className="font-mono text-[10px]">{SOURCE_PROVENANCE[k] || "未記錄"}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
           </div>
         )}
       </Block>
