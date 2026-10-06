@@ -2,121 +2,166 @@ import type { Candle, IndicatorSnapshot } from "../types";
 
 export type { Candle };
 
-// ---- 基礎工具 ----
-export function ema(values: number[], period: number): number {
-  if (values.length < period) return values[values.length - 1] ?? 0;
-  const k = 2 / (period + 1);
-  let prev = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+function validatePeriod(period: number) {
+  if (!Number.isInteger(period) || period < 1) throw new RangeError("指標週期必須為正整數");
+}
+
+function validateValues(values: number[]) {
+  if (values.some(value => !Number.isFinite(value))) throw new RangeError("指標資料必須為有限數值");
+}
+
+function requireHistory(values: number[], period: number) {
+  validatePeriod(period);
+  validateValues(values);
+  if (values.length < period) throw new RangeError(`指標至少需要 ${period} 筆資料`);
+}
+
+// SMA 初始化；null 表示尚未完成暖機，不拿最後價格代替 EMA。
+export function emaSeries(values: number[], period: number): (number | null)[] {
+  validatePeriod(period);
+  validateValues(values);
+  const result: (number | null)[] = Array(values.length).fill(null);
+  if (values.length < period) return result;
+  let previous = values.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+  result[period - 1] = previous;
+  const alpha = 2 / (period + 1);
   for (let i = period; i < values.length; i++) {
-    prev = values[i] * k + prev * (1 - k);
+    previous += alpha * (values[i] - previous);
+    result[i] = previous;
   }
-  return prev;
+  return result;
+}
+
+export function ema(values: number[], period: number): number {
+  requireHistory(values, period);
+  return emaSeries(values, period)[values.length - 1]!;
 }
 
 function sma(values: number[], period: number): number {
-  if (values.length < period) return values[values.length - 1] ?? 0;
-  const slice = values.slice(-period);
-  return slice.reduce((a, b) => a + b, 0) / period;
+  requireHistory(values, period);
+  return values.slice(-period).reduce((sum, value) => sum + value, 0) / period;
 }
 
-// RSI (Wilder)
+// Wilder RSI：初始平均漲跌幅為 SMA，後續以 1/period 遞迴平滑。
 export function rsi(closes: number[], period = 14): number {
-  if (closes.length < period + 1) return 50;
+  validatePeriod(period);
+  requireHistory(closes, period + 1);
   let gain = 0;
   let loss = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const d = closes[i] - closes[i - 1];
-    if (d >= 0) gain += d;
-    else loss -= d;
+  for (let i = 1; i <= period; i++) {
+    const change = closes[i] - closes[i - 1];
+    gain += Math.max(change, 0);
+    loss += Math.max(-change, 0);
   }
   gain /= period;
   loss /= period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const change = closes[i] - closes[i - 1];
+    gain = (gain * (period - 1) + Math.max(change, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-change, 0)) / period;
+  }
+  if (gain === 0 && loss === 0) return 50;
   if (loss === 0) return 100;
-  const rs = gain / loss;
-  return 100 - 100 / (1 + rs);
+  return 100 - 100 / (1 + gain / loss);
 }
 
-// MACD
-export function macd(closes: number[]): { macd: number; signal: number; hist: number } {
-  if (closes.length < 26) return { macd: 0, signal: 0, hist: 0 };
-  const ema12 = ema(closes, 12);
-  const ema26 = ema(closes, 26);
-  const macdLine = ema12 - ema26;
-  // signal: EMA(9) of macd line — 簡化：用最後 9 筆近似
-  return { macd: macdLine, signal: macdLine * 0.9, hist: macdLine * 0.1 };
+// MACD(12,26,9)：兩條 EMA 均以 SMA 初始化；EMA9 使用完整的有效 MACD 序列。
+export function macd(closes: number[], fast = 12, slow = 26, signalPeriod = 9): {
+  macd: number | null; signal: number | null; hist: number | null;
+} {
+  [fast, slow, signalPeriod].forEach(validatePeriod);
+  if (fast >= slow) throw new RangeError("MACD 快線週期必須小於慢線");
+  const fastSeries = emaSeries(closes, fast);
+  const slowSeries = emaSeries(closes, slow);
+  if (closes.length < slow) return { macd: null, signal: null, hist: null };
+  const lines = closes.slice(slow - 1).map((_, i) => fastSeries[i + slow - 1]! - slowSeries[i + slow - 1]!);
+  const line = lines[lines.length - 1];
+  const signals = emaSeries(lines, signalPeriod);
+  const signal = signals[signals.length - 1];
+  return { macd: line, signal, hist: signal === null ? null : line - signal };
 }
 
-// KD (Stochastic)
+// KD(9,3,3)：RSV 為 9 根高低區間；K、D 從 50 開始，以 1/3 遞迴平滑。
 export function stochastic(highs: number[], lows: number[], closes: number[], period = 9): { k: number; d: number } {
-  if (closes.length < period) return { k: 50, d: 50 };
-  const sliceH = highs.slice(-period);
-  const sliceL = lows.slice(-period);
-  const hh = Math.max(...sliceH);
-  const ll = Math.min(...sliceL);
-  const last = closes[closes.length - 1];
-  const rsv = hh === ll ? 50 : ((last - ll) / (hh - ll)) * 100;
-  const k = rsv * 0.3 + 50 * 0.7; // 簡化平滑
-  const d = k * 0.3 + 50 * 0.7;
+  requireHistory(closes, period);
+  validateValues(highs);
+  validateValues(lows);
+  if (highs.length !== closes.length || lows.length !== closes.length) throw new RangeError("KD 資料長度不一致");
+  let k = 50;
+  let d = 50;
+  for (let i = period - 1; i < closes.length; i++) {
+    const high = Math.max(...highs.slice(i - period + 1, i + 1));
+    const low = Math.min(...lows.slice(i - period + 1, i + 1));
+    if (high < low || closes[i] < low || closes[i] > high) throw new RangeError("KD 價格區間無效");
+    const rsv = high === low ? 50 : (closes[i] - low) / (high - low) * 100;
+    k = (2 * k + rsv) / 3;
+    d = (2 * d + k) / 3;
+  }
   return { k, d };
 }
 
-// 布林通道
 export function bollinger(closes: number[], period = 20, mult = 2): { upper: number; mid: number; lower: number } {
   const mid = sma(closes, period);
-  const slice = closes.slice(-period);
-  const variance = slice.reduce((a, b) => a + (b - mid) ** 2, 0) / period;
+  const variance = closes.slice(-period).reduce((sum, value) => sum + (value - mid) ** 2, 0) / period;
   const sd = Math.sqrt(variance);
   return { upper: mid + mult * sd, mid, lower: mid - mult * sd };
 }
 
-// ATR
-export function atr(candles: Candle[], period = 14): number {
-  if (candles.length < 2) return 0;
-  const trs: number[] = [];
-  for (let i = 1; i < candles.length; i++) {
+export function validateCandles(candles: Candle[]): void {
+  for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
-    const p = candles[i - 1];
-    trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    if (![c.time, c.open, c.high, c.low, c.close, c.volume].every(Number.isFinite)
+      || c.time < 0 || c.low <= 0 || c.volume < 0
+      || c.low > Math.min(c.open, c.close) || c.high < Math.max(c.open, c.close)
+      || (i > 0 && c.time <= candles[i - 1].time)) {
+      throw new RangeError("K 線必須為有效 OHLCV，時間遞增且不重複");
+    }
   }
-  return sma(trs, Math.min(period, trs.length));
 }
 
-// VWAP (當日累積)
-export function vwap(candles: Candle[]): number {
-  if (!candles.length) return 0;
-  let pv = 0;
-  let vol = 0;
+// Wilder ATR：第一筆 TR 為 high-low，後續 TR 包含隔日跳空，再以 1/period 平滑。
+export function atr(candles: Candle[], period = 14): number {
+  validatePeriod(period);
+  validateCandles(candles);
+  if (candles.length < period) throw new RangeError(`ATR 至少需要 ${period} 根 K 線`);
+  const ranges = candles.map((c, i) => i === 0 ? c.high - c.low
+    : Math.max(c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close)));
+  let result = ranges.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+  for (let i = period; i < ranges.length; i++) result = (result * (period - 1) + ranges[i]) / period;
+  return result;
+}
+
+// 指定輸入區間的 typical-price 成交量加權均價，並非盤中逐筆成交 VWAP。
+export function volumeWeightedPrice(candles: Candle[]): number | null {
+  validateCandles(candles);
+  let weighted = 0;
+  let volume = 0;
   for (const c of candles) {
-    const tp = (c.high + c.low + c.close) / 3;
-    pv += tp * c.volume;
-    vol += c.volume;
+    weighted += ((c.high + c.low + c.close) / 3) * c.volume;
+    volume += c.volume;
   }
-  return vol === 0 ? 0 : pv / vol;
+  return volume === 0 ? null : weighted / volume;
 }
 
-// 計算完整指標快照
+export function rollingVolumeWeightedPrice(candles: Candle[], period = 20): number | null {
+  validatePeriod(period);
+  if (candles.length < period) return null;
+  return volumeWeightedPrice(candles.slice(-period));
+}
+
 export function computeIndicators(candles: Candle[]): IndicatorSnapshot {
-  const closes = candles.map((c) => c.close);
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
+  validateCandles(candles);
+  if (candles.length < 200) throw new RangeError("完整指標需要至少 200 根日線");
+  const closes = candles.map(c => c.close);
   const m = macd(closes);
-  const st = stochastic(highs, lows, closes);
+  const st = stochastic(candles.map(c => c.high), candles.map(c => c.low), closes);
   const boll = bollinger(closes);
   return {
-    ema20: ema(closes, 20),
-    ema50: ema(closes, 50),
-    ema200: ema(closes, 200),
-    rsi: rsi(closes),
-    macd: m.macd,
-    macdSignal: m.signal,
-    macdHist: m.hist,
-    k: st.k,
-    d: st.d,
-    bollUpper: boll.upper,
-    bollMid: boll.mid,
-    bollLower: boll.lower,
-    atr: atr(candles),
-    vwap: vwap(candles),
-    lastClose: closes[closes.length - 1] ?? 0,
+    ema20: ema(closes, 20), ema50: ema(closes, 50), ema200: ema(closes, 200),
+    rsi: rsi(closes), macd: m.macd!, macdSignal: m.signal!, macdHist: m.hist!,
+    k: st.k, d: st.d,
+    bollUpper: boll.upper, bollMid: boll.mid, bollLower: boll.lower,
+    atr: atr(candles), volumeWeightedPrice20: rollingVolumeWeightedPrice(candles),
+    lastClose: closes[closes.length - 1],
   };
 }

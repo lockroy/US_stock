@@ -76,7 +76,7 @@ export interface IndicatorSnapshot {
   bollMid: number;
   bollLower: number;
   atr: number;
-  vwap: number;
+  volumeWeightedPrice20: number | null; // 20 根日線 typical-price 成交量加權均價
   lastClose: number;
 }
 
@@ -86,6 +86,7 @@ export interface FactorScore {
   sub: string;
   score: number;
   max: number;
+  available?: boolean;
 }
 
 export interface ScoreResult {
@@ -93,6 +94,7 @@ export interface ScoreResult {
   tier: string; // 評級
   factors: FactorScore[];
   proxies: string[]; // 代理指標說明
+  completeness: { percent: number; availablePoints: number; missing: string[] };
 }
 
 // Fable 增強
@@ -114,15 +116,16 @@ export interface TradeRule {
 
 export interface TradePlan {
   buyZone: string;
+  entry: number;
   target: number;
   stop: number;
 }
 
-export type AuditVerdict = "核准" | "修改" | "拒絕";
+export type AuditVerdict = "核准" | "修改" | "拒絕" | "未驗證";
 
 export interface AuditItem {
   name: string;
-  pass: boolean;
+  pass: boolean | null;
   note: string;
 }
 
@@ -137,11 +140,12 @@ export interface BuyPoint {
   reason: string;
 }
 
-export type DataSource = "nasdaq" | "mock" | "derived" | "proxy";
+export type DataSource = "nasdaq" | "mock" | "derived" | "proxy" | "unknown";
 
 // 完整報告
 export interface StockReport {
   quote: Quote;
+  mode: "real" | "demo";
   score: ScoreResult;
   memo: ResearchMemo;
   rules: TradeRule[];
@@ -152,4 +156,16 @@ export interface StockReport {
   candlesDaily: Candle[];
   candlesIntraday: Candle[];
   sources: Record<string, DataSource>; // 各數據塊實際來源（nasdaq=真實/mock=模擬/derived=推導/proxy=代理）
+}
+
+
+export interface DataResponse<T> {
+  mode: "real" | "demo";
+  source: DataSource;
+  data: T | null;
+  symbol?: string;
+  query?: string;
+  range?: Range;
+  inputSource?: DataSource;
+  message?: string;
 }

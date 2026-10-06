@@ -4,12 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Chart } from "@/components/Chart";
 import type { StockReport } from "@/lib/types";
 
-const tierColor: Record<string, string> = {
-  強烈建議買入: "#22c55e",
-  建議買入: "#22c55e",
-  觀望: "#f59e0b",
-  避開: "#ef4444",
-};
+import { tierColor } from "@/lib/scoring/presentation";
 
 // 數據來源標籤
 const SOURCE_LABEL: Record<string, string> = {
@@ -17,12 +12,14 @@ const SOURCE_LABEL: Record<string, string> = {
   derived: "推導計算",
   mock: "模擬數據",
   proxy: "代理假設",
+  unknown: "未知 / 未取得",
 };
 const SOURCE_COLOR: Record<string, string> = {
   nasdaq: "#22c55e",
   derived: "#58a6ff",
   mock: "#f59e0b",
   proxy: "#8b949e",
+  unknown: "#8b949e",
 };
 const SOURCE_KEY_LABEL: Record<string, string> = {
   quote: "報價",
@@ -41,16 +38,16 @@ const SOURCE_KEY_LABEL: Record<string, string> = {
 // 每個數據區塊的「源頭出處」說明（給 fact-check 用）
 // key 對應 sources 的 key，value 是給人讀的中文說明，標示從哪個檔/端點來的
 const SOURCE_PROVENANCE: Record<string, string> = {
-  quote: "lib/futu/nasdaq.ts → fetchQuote()｜Nasdaq /api/quote/{t}/info",
+  quote: "lib/futu/nasdaq.ts → fetchVerifiedQuote()｜Nasdaq /api/quote/{t}/info",
   candlesDaily: "lib/futu/nasdaq.ts → fetchDaily()｜Nasdaq /api/quote/{t}/historical",
-  candlesIntraday: "lib/futu/mock.ts → fetchIntraday()｜目前無真實源，以日線收盤價模擬",
+  candlesIntraday: "尚未接入真實分時資料",
   financials: "lib/futu/nasdaq.ts → fetchFinancials()｜Nasdaq /api/company/{t}/financials",
-  valuation: "lib/futu/nasdaq.ts → buildValuation()｜市值÷財務數字推導",
-  ratings: "lib/futu/mock.ts → fetchRatings()｜無免費真實源，種子隨機生成",
-  news: "lib/futu/mock.ts → fetchNews()｜無免費真實源，種子隨機生成",
+  valuation: "lib/futu/nasdaq.ts → deriveValuation()｜市值÷財務數字推導",
+  ratings: "尚未接入真實評級資料",
+  news: "尚未接入真實新聞資料",
   marketTrendUp: "lib/futu/nasdaq.ts → fetchEtfDaily(SPY)｜Nasdaq /api/quote/SPY/historical",
   sectorStrong: "lib/futu/nasdaq.ts → fetchEtfDaily(sector ETF)｜Nasdaq /api/quote/{ETF}/historical",
-  indicators: "lib/indicators/indicators.ts｜由 candlesDaily 本地計算（EMA/RSI/MACD/KD/布林/ATR/VWAP）",
+  indicators: "lib/indicators/indicators.ts｜由 candlesDaily 本地計算（EMA/RSI/MACD/KD/布林/ATR/20日成交量加權均價）",
   scoring: "lib/scoring/scoring.ts｜本地評分模型（基本面30+估值20+技術30+情緒20=100）",
 };
 
@@ -67,25 +64,36 @@ function Block({ n, title, fable, children }: { n: number; title: string; fable?
   );
 }
 
+class ReportRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 function ReportView({ symbol }: { symbol: string }) {
-  const { data, isLoading, isError } = useQuery<StockReport>({
+  const { data, isLoading, isError, error } = useQuery<StockReport>({
     queryKey: ["report", symbol],
-    queryFn: async () => {
-      const res = await fetch(`/api/report?symbol=${symbol}`);
-      if (!res.ok) throw new Error("fetch fail");
+    retry: (failures, error) => failures < 1 && (!(error instanceof ReportRequestError) || error.status >= 500 || error.status === 429),
+    queryFn: async ({ signal }) => {
+      const res = await fetch(`/api/report?symbol=${encodeURIComponent(symbol)}`, { signal });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new ReportRequestError(body?.error || "暫時無法取得報告", res.status);
+      }
       return res.json();
     },
   });
 
   if (isLoading) return <div className="card p-6 text-muted">載入報告中…</div>;
-  if (isError || !data) return <div className="card p-6 text-bad">無法取得數據，請確認代號或稍後再試。</div>;
+  if (isError || !data) return <div className="card p-6 text-bad">{error instanceof Error ? error.message : "暫時無法取得報告，請稍後再試。"}</div>;
 
   const r = data;
   const up = r.quote.change >= 0;
-  const color = tierColor[r.score.tier] || "#8b949e";
+  const color = tierColor(r.score.tier);
 
   return (
     <div>
+      {r.mode === "demo" && <div className="card p-4 mb-4 text-warn">示範模式：報價、財務、估值、評級與新聞為模擬資料，不能視為真實投資依據。</div>}
       {/* 1 報價頭 */}
       <Block n={1} title="報價頭">
         <div className="flex flex-wrap items-end gap-4">
@@ -104,14 +112,14 @@ function ReportView({ symbol }: { symbol: string }) {
         {/* 數據來源標註（透明化：每項數據實際從哪裡來） */}
         {r.sources && (
           <div className="mt-3 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted">數據來源：</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] text-muted whitespace-nowrap">數據來源：</span>
               {Object.entries(r.sources).map(([k, v]) => (
                 <span
                   key={k}
-                  className="text-[10px] px-1.5 py-0.5 rounded-full border cursor-help"
+                  className="shrink-0 whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded-full border cursor-help"
                   style={{ color: SOURCE_COLOR[v], borderColor: `${SOURCE_COLOR[v]}55` }}
-                  title={`${SOURCE_KEY_LABEL[k] || k}：${SOURCE_LABEL[v] || v}\n出處：${SOURCE_PROVENANCE[k] || "未記錄"}`}
+                  title={`${SOURCE_KEY_LABEL[k] || k}：${SOURCE_LABEL[v] || v}\n出處：${v === "unknown" ? "未取得資料，未用模擬值補缺" : v === "mock" ? "示範模式：lib/futu/mock.ts 生成，非真實市場資料" : SOURCE_PROVENANCE[k] || "未記錄"}`}
                 >
                   {SOURCE_KEY_LABEL[k] || k}·{SOURCE_LABEL[v] || v}
                 </span>
@@ -129,7 +137,7 @@ function ReportView({ symbol }: { symbol: string }) {
                     <span className="text-muted"> · </span>
                     <span>{SOURCE_LABEL[v] || v}</span>
                     <span className="text-muted"> · </span>
-                    <span className="font-mono text-[10px]">{SOURCE_PROVENANCE[k] || "未記錄"}</span>
+                    <span className="font-mono text-[10px] break-all">{v === "unknown" ? "未取得資料，未用模擬值補缺" : v === "mock" ? "示範模式：lib/futu/mock.ts 生成，非真實市場資料" : SOURCE_PROVENANCE[k] || "未記錄"}</span>
                   </li>
                 ))}
               </ul>
@@ -140,14 +148,19 @@ function ReportView({ symbol }: { symbol: string }) {
 
       {/* 2 評分總覽 */}
       <Block n={2} title="評分總覽 + 評級">
-        <div className="flex items-center gap-4">
-          <div className="text-4xl font-bold" style={{ color }}>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-4xl font-bold whitespace-nowrap" style={{ color }}>
             {r.score.total}
             <span className="text-base text-muted">/100</span>
           </div>
           <div className="px-3 py-1 rounded-full text-sm font-semibold" style={{ background: `${color}22`, color }}>
             {r.score.tier}
           </div>
+        </div>
+        {r.score.completeness.percent < 100 && <p className="text-xs text-muted mt-2">此為已知部分得分。</p>}
+        <div className="text-sm text-warn mt-2">
+          評分資料完整度 {r.score.completeness.percent}%（按評分權重計算；不代表資料真實度）
+          {r.score.completeness.missing.length > 0 && <div>缺失：{r.score.completeness.missing.join("；")}。缺失項不計分，未重新放大其餘分數。</div>}
         </div>
         {r.score.proxies.length > 0 && (
           <div className="text-xs text-muted mt-2">註：{r.score.proxies.join("；")}</div>
@@ -170,7 +183,7 @@ function ReportView({ symbol }: { symbol: string }) {
                 <td className="py-1 text-muted">{f.dimension}</td>
                 <td>{f.sub}</td>
                 <td className="text-right">
-                  {f.score} / {f.max}
+                  {f.available === false ? "未知" : f.score} / {f.max}
                 </td>
               </tr>
             ))}
@@ -206,6 +219,7 @@ function ReportView({ symbol }: { symbol: string }) {
       <Block n={6} title="交易 / 投資計畫">
         <div className="flex flex-wrap gap-4 text-sm">
           <div><span className="text-muted">買入區間：</span>{r.plan.buyZone}</div>
+          <div><span className="text-muted">入場參考：</span>${r.plan.entry}</div>
           <div><span className="text-muted">目標價：</span><span className="text-ok">${r.plan.target}</span></div>
           <div><span className="text-muted">停損點：</span><span className="text-bad">${r.plan.stop}</span></div>
         </div>
@@ -217,7 +231,7 @@ function ReportView({ symbol }: { symbol: string }) {
           {r.audit.items.map((it, i) => (
             <li key={i} className="flex justify-between border-b border-line py-1 last:border-0">
               <span>{it.name} <span className="text-muted text-xs">— {it.note}</span></span>
-              <span className={it.pass ? "text-ok" : "text-bad"}>{it.pass ? "✓" : "✗"}</span>
+              <span className={`shrink-0 pl-2 ${it.pass === null ? "text-muted" : it.pass ? "text-ok" : "text-bad"}`}>{it.pass === null ? "未驗證" : it.pass ? "✓" : "✗"}</span>
             </li>
           ))}
         </ul>
@@ -241,6 +255,7 @@ function ReportView({ symbol }: { symbol: string }) {
       {/* 9 買入理由（圖+新聞） */}
       <Block n={9} title="買入理由區（圖 + 新聞）" fable>
         <div className="mb-3"><Chart candles={r.candlesDaily} buyPoints={r.buyPoints} height={300} /></div>
+        {r.news.length === 0 && <p className="text-sm text-muted">未取得真實新聞。</p>}
         <ul className="text-sm space-y-2">
           {r.news.slice(0, 3).map((n, i) => (
             <li key={i} className="border-b border-line pb-2 last:border-0">

@@ -16,7 +16,7 @@ function scale(ratio: number, max: number): number {
 export function scoreFundamental(f: Financials): { score: number; factors: FactorScore[] } {
   const growth = scale((Math.max(0, f.revenueGrowth) + Math.max(0, f.epsGrowth)) / 30, 10); // 各 15% 成長 → 滿分
   const profit = scale((Math.max(0, f.grossMargin) + Math.max(0, f.roe) + Math.max(0, f.roic)) / 150, 10);
-  const structure = scale((f.fcf > 0 ? 5 : 0) + (f.debtToEquity < 1 ? 5 : 0), 10);
+  const structure = (f.fcf > 0 ? 5 : 0) + (f.debtToEquity >= 0 && f.debtToEquity < 1 ? 5 : 0);
   const score = growth + profit + structure;
   return {
     score,
@@ -77,9 +77,9 @@ export function scoreValuation(v: Valuation, roe?: number): { score: number; fac
     return {
       score,
       factors: [
-        { dimension: "估值", sub: "P/S (虧損股退路)", score: +psScore.toFixed(1), max: 8 },
-        { dimension: "估值", sub: "EV/Sales (退路)", score: +evScore.toFixed(1), max: 6 },
-        { dimension: "估值", sub: "現金流收益率", score: +fcfScore.toFixed(1), max: 6 },
+        { dimension: "估值", sub: "P/S (虧損股退路)", score: +psScore.toFixed(1), max: 8, available: v.ps !== null },
+        { dimension: "估值", sub: "EV/Sales (退路)", score: +evScore.toFixed(1), max: 6, available: v.evSales !== null },
+        { dimension: "估值", sub: "現金流收益率", score: +fcfScore.toFixed(1), max: 6, available: v.fcfYield !== null },
       ],
     };
   }
@@ -90,8 +90,9 @@ export function scoreValuation(v: Valuation, roe?: number): { score: number; fac
   return {
     score,
     factors: [
-      { dimension: "估值", sub: "P/E 配 PEG", score: +(peScore + pegScore).toFixed(1), max: 14 },
-      { dimension: "估值", sub: "P/B", score: +pbScore.toFixed(1), max: 6 },
+      { dimension: "估值", sub: "P/E", score: +peScore.toFixed(1), max: 8 },
+      { dimension: "估值", sub: "PEG", score: +pegScore.toFixed(1), max: 6, available: v.peg !== null },
+      { dimension: "估值", sub: "P/B", score: +pbScore.toFixed(1), max: 6, available: v.pb !== null },
     ],
   };
 }
@@ -109,8 +110,8 @@ export function scoreTechnical(ind: IndicatorSnapshot): { score: number; factors
   else mom += 1;
   if (ind.macd > ind.macdSignal) mom += 3;
   if (ind.k > ind.d) mom += 3;
-  // 量價/VWAP
-  const vp = ind.lastClose > ind.vwap ? 5 : 0;
+  // 20 日成交量加權均價
+  const vp = ind.volumeWeightedPrice20 !== null && ind.lastClose > ind.volumeWeightedPrice20 ? 5 : 0;
   // 共振
   const resonance = ind.ema20 > ind.ema50 && ind.ema50 > ind.ema200 && ind.rsi < 70 && ind.macd > ind.macdSignal;
   const resonanceScore = resonance ? 5 : 2;
@@ -121,25 +122,26 @@ export function scoreTechnical(ind: IndicatorSnapshot): { score: number; factors
     factors: [
       { dimension: "技術", sub: "均線排列(20/50/200)", score: +ma.toFixed(1), max: 10 },
       { dimension: "技術", sub: "動能(RSI/MACD/KD)", score: +mom.toFixed(1), max: 10 },
-      { dimension: "技術", sub: "量價/VWAP", score: +vp.toFixed(1), max: 5 },
-      { dimension: "技術", sub: "布林+ATR 共振", score: +resonanceScore.toFixed(1), max: 5 },
+      { dimension: "技術", sub: "20日成交量加權均價", score: +vp.toFixed(1), max: 5, available: ind.volumeWeightedPrice20 !== null },
+      { dimension: "技術", sub: "均線+動能共振", score: +resonanceScore.toFixed(1), max: 5 },
     ],
   };
 }
 
 // ---- 情緒/宏觀 20 (代理指標) ----
-export function scoreSentiment(r: Ratings, marketTrendUp: boolean, sectorStrong: boolean): { score: number; factors: FactorScore[]; proxies: string[] } {
-  const moat = scale(r.ratingScore / 5, 8); // 代理：分析師評級
-  const macro = (marketTrendUp ? 4 : 1) + (sectorStrong ? 3 : 1); // 代理：大盤+產業
-  const rating = scale(r.ratingScore / 5, 5);
+export function scoreSentiment(r: Ratings | null, marketTrendUp: boolean | null, sectorStrong: boolean | null): { score: number; factors: FactorScore[]; proxies: string[] } {
+  const moat = r ? scale(r.ratingScore / 5, 8) : 0; // 代理：分析師評級
+  const macro = (marketTrendUp === null ? 0 : marketTrendUp ? 4 : 1) + (sectorStrong === null ? 0 : sectorStrong ? 3 : 1); // 代理：大盤+產業
+  const rating = r ? scale(r.ratingScore / 5, 5) : 0;
   const score = moat + macro + rating;
   return {
     score,
     proxies: ["護城河=分析師評級代理", "總經=SPY 趨勢+產業相對強弱代理"],
     factors: [
-      { dimension: "情緒/宏觀", sub: "產業護城河(代理)", score: +moat.toFixed(1), max: 8 },
-      { dimension: "情緒/宏觀", sub: "總經環境(代理)", score: +macro.toFixed(1), max: 7 },
-      { dimension: "情緒/宏觀", sub: "財報/評級", score: +rating.toFixed(1), max: 5 },
+      { dimension: "情緒/宏觀", sub: "產業護城河(代理)", score: +moat.toFixed(1), max: 8, available: r !== null },
+      { dimension: "情緒/宏觀", sub: "大盤趨勢(代理)", score: marketTrendUp === null ? 0 : marketTrendUp ? 4 : 1, max: 4, available: marketTrendUp !== null },
+      { dimension: "情緒/宏觀", sub: "產業相對強弱(代理)", score: sectorStrong === null ? 0 : sectorStrong ? 3 : 1, max: 3, available: sectorStrong !== null },
+      { dimension: "情緒/宏觀", sub: "財報/評級", score: +rating.toFixed(1), max: 5, available: r !== null },
     ],
   };
 }
@@ -153,24 +155,31 @@ export function tierOf(total: number): string {
 }
 
 export interface ScoreInput {
-  financials: Financials;
-  valuation: Valuation;
-  ratings: Ratings;
+  financials: Financials | null;
+  valuation: Valuation | null;
+  ratings: Ratings | null;
   indicators: IndicatorSnapshot;
-  marketTrendUp: boolean;
-  sectorStrong: boolean;
+  marketTrendUp: boolean | null;
+  sectorStrong: boolean | null;
 }
 
 export function score(input: ScoreInput): ScoreResult {
-  const f = scoreFundamental(input.financials);
-  const v = scoreValuation(input.valuation, input.financials.roe);
+  const unavailable = (dimension: string, max: number) => ({
+    score: 0,
+    factors: [{ dimension, sub: "資料未知（不計分）", score: 0, max, available: false }],
+  });
+  const f = input.financials ? scoreFundamental(input.financials) : unavailable("基本面", 30);
+  const v = input.valuation ? scoreValuation(input.valuation, input.financials?.roe) : unavailable("估值", 20);
   const t = scoreTechnical(input.indicators);
   const s = scoreSentiment(input.ratings, input.marketTrendUp, input.sectorStrong);
   const factors = [...f.factors, ...v.factors, ...t.factors, ...s.factors];
   const total = Math.round(f.score + v.score + t.score + s.score);
+  const missing = factors.filter(f => f.available === false).map(f => `${f.dimension}：${f.sub}`);
+  const availablePoints = factors.filter(f => f.available !== false).reduce((sum, f) => sum + f.max, 0);
   return {
     total: Math.max(0, Math.min(100, total)),
-    tier: tierOf(total),
+    tier: missing.length ? "資料不足 / 暫不評級" : tierOf(total),
+    completeness: { percent: availablePoints, availablePoints, missing },
     factors,
     proxies: s.proxies,
   };

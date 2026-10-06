@@ -1,3 +1,4 @@
+import { normalizeTicker } from "./symbol";
 import type { StockReport, Candle, Financials, Valuation, Ratings, NewsItem, Quote, DataSource } from "../types";
 import { computeIndicators } from "../indicators/indicators";
 import { score } from "../scoring/scoring";
@@ -5,120 +6,115 @@ import { buildMemo, buildPlan, buildRules, audit, findBuyPoints } from "../fable
 import * as mock from "./mock";
 import * as nasdaq from "./nasdaq";
 
-// 真實數據開關：預設啟用 Nasdaq 公開源；設 REAL_DATA=false 可強制回 mock
-const REAL_DATA = (process.env.REAL_DATA ?? "true") !== "false";
+export class ReportError extends Error {
+  constructor(public code: "INVALID_SYMBOL" | "INVALID_RANGE" | "SYMBOL_NOT_FOUND" | "DATA_UNAVAILABLE", message: string) {
+    super(message);
+  }
+  get status() { return (this.code === "INVALID_SYMBOL" || this.code === "INVALID_RANGE") ? 400 : this.code === "SYMBOL_NOT_FOUND" ? 404 : 503; }
+}
 
-const CLIENT_ID = process.env.FUTU_CLIENT_ID;
-const CLIENT_SECRET = process.env.FUTU_CLIENT_SECRET;
-// 富途 REST API base（免閘道 OAuth 2.1）。實際 endpoint 待憑證到手後對齊官方文檔。
-const FUTU_API_BASE = process.env.FUTU_API_BASE || "https://openapi.futunn.com";
+export function normalizeSymbol(raw: string): string {
+  const ticker = normalizeTicker(raw);
+  if (!ticker) throw new ReportError("INVALID_SYMBOL", "股票代號格式無效");
+  return `US.${ticker}`;
+}
 
 export function hasFutuCreds(): boolean {
-  return !!CLIENT_ID && !!CLIENT_SECRET;
+  return !!process.env.FUTU_CLIENT_ID && !!process.env.FUTU_CLIENT_SECRET;
 }
 
-// 真實富途調用骨架（憑證到手後啟用）。目前返回 null 觸發 fallback。
-async function futuGet<T>(_path: string): Promise<T | null> {
-  if (!hasFutuCreds()) return null;
-  // TODO: OAuth 2.1 取 token → GET `${FUTU_API_BASE}${_path}`
-  return null;
+export interface ReportOptions {
+  realData?: boolean;
+  provider?: typeof nasdaq;
 }
 
-function toUsSymbol(symbol: string): string {
-  return symbol.toUpperCase().startsWith("US.") ? symbol.toUpperCase() : `US.${symbol.toUpperCase()}`;
+// 所有股票資料入口共用模式、代號與存在性驗證。
+export async function getDataContext(rawSymbol: string, options: ReportOptions = {}) {
+  const symbol = normalizeSymbol(rawSymbol);
+  const mode: "real" | "demo" = (options.realData ?? process.env.REAL_DATA !== "false") ? "real" : "demo";
+  const provider = options.provider ?? nasdaq;
+  if (mode === "demo") return { symbol, mode, provider, quote: mock.mockQuote(symbol) };
+  try { return { symbol, mode, provider, quote: await provider.fetchVerifiedQuote(symbol) }; }
+  catch (error) {
+    if (error instanceof nasdaq.QuoteLookupError) throw new ReportError(error.code, error.message);
+    throw new ReportError("DATA_UNAVAILABLE", "行情服務暫時不可用，無法驗證股票代號");
+  }
 }
 
-// 彙整完整報告（真實 Nasdaq 優先，逐項 fallback 並標註來源）
-export async function buildReport(rawSymbol: string): Promise<StockReport> {
-  const symbol = toUsSymbol(rawSymbol);
+// 真實模式不以模擬資料補缺；REAL_DATA=false 是明確的示範模式。
+export async function buildReport(rawSymbol: string, options: ReportOptions = {}): Promise<StockReport> {
+  const { symbol, mode, provider, quote: verifiedQuote } = await getDataContext(rawSymbol, options);
+  const real = mode === "real";
   const sources: Record<string, DataSource> = {};
+  let quote: Quote;
+  let daily: Candle[];
+  let financials: Financials | null;
+  let valuation: Valuation | null;
+  let ratings: Ratings | null;
+  let news: NewsItem[];
+  let marketTrendUp: boolean | null = null;
+  let sectorStrong: boolean | null = null;
 
-  // ---- 第一波：並行拉取 Nasdaq（行情/日線/摘要/財務/大盤）----
-  const [realQuote, realDaily, summary, finRaw, spyTrend] = REAL_DATA
-    ? await Promise.all([
-        nasdaq.fetchQuote(symbol),
-        nasdaq.fetchDaily(symbol),
-        nasdaq.fetchSummary(symbol),
-        nasdaq.fetchFinancials(symbol),
-        nasdaq.fetchSpyTrend(),
-      ])
-    : [null, null, null, null, null];
-
-  // ---- 逐項組裝（真實優先，mock 兜底）----
-  const quote: Quote = realQuote || mock.mockQuote(symbol);
-  sources.quote = realQuote ? "nasdaq" : "mock";
-
-  const daily: Candle[] = realDaily || mock.mockDailyCandles(symbol);
-  sources.candlesDaily = realDaily ? "nasdaq" : "mock";
-
-  // 財務：Nasdaq 年報四表
-  const financials: Financials = finRaw?.fin || mock.mockFinancials(symbol);
-  sources.financials = finRaw ? "nasdaq" : "mock";
-
-  // 估值：市值 + 財務推導（PE/PEG/PB/PS/FCF yield/EV-Sales）
-  const derivedVal = summary && finRaw ? nasdaq.deriveValuation(summary.marketCap, finRaw) : null;
-  const valuation: Valuation = derivedVal || mock.mockValuation(symbol);
-  sources.valuation = derivedVal ? "derived" : "mock";
-
-  // 日內：Nasdaq 無分時 → 日線降級（按日收盤畫）
-  const intraday =
-    (await futuGet<Candle[]>(`/quote-api/candles?symbol=${symbol}&range=1D`)) ||
-    daily.slice(-60).map((c) => ({ ...c, open: c.close, high: c.close, low: c.close }));
-  sources.candlesIntraday = "mock";
-
-  // 評級/新聞：無穩定免費源 → mock 標註（待接 Finnhub key 或富途）
-  const ratings: Ratings = (await futuGet<Ratings>(`/quote-api/ratings?symbol=${symbol}`)) || mock.mockRatings(symbol);
-  sources.ratings = "mock";
-  const news: NewsItem[] = (await futuGet<NewsItem[]>(`/quote-api/news?symbol=${symbol}`)) || mock.mockNews(symbol);
-  sources.news = "mock";
-
-  // ---- 第二波：產業相對強弱（依賴 summary.sector）----
-  const sectorStrong = (REAL_DATA && summary ? await nasdaq.fetchSectorStrength(summary.sector) : null) ?? true;
-  sources.sectorStrong = sectorStrong === null ? "proxy" : "nasdaq";
-  const marketTrendUp = spyTrend ?? true;
-  sources.marketTrendUp = spyTrend === null ? "proxy" : "nasdaq";
-
-  // ---- 純計算層（本地推導，不吃外部數據）----
-  const indicators = computeIndicators(daily);
-  const scoreResult = score({
-    financials,
-    valuation,
-    ratings,
-    indicators,
-    marketTrendUp,
-    sectorStrong,
-  });
+  if (real) {
+    quote = verifiedQuote;
+    const [candles, summary, finRaw, spyTrend] = await Promise.all([
+      provider.fetchDaily(symbol), provider.fetchSummary(symbol),
+      provider.fetchFinancials(symbol), provider.fetchSpyTrend(),
+    ]);
+    if (!candles || candles.length < 200) {
+      throw new ReportError("DATA_UNAVAILABLE", "有效日線不足 200 根，暫時無法產生報告");
+    }
+    daily = candles;
+    financials = finRaw?.fin ?? null;
+    valuation = summary && finRaw ? provider.deriveValuation(summary.marketCap, finRaw) : null;
+    ratings = null;
+    news = [];
+    marketTrendUp = spyTrend;
+    sectorStrong = summary ? await provider.fetchSectorStrength(summary.sector) : null;
+    sources.quote = sources.candlesDaily = "nasdaq";
+    sources.financials = financials ? "nasdaq" : "unknown";
+    sources.valuation = valuation ? "derived" : "unknown";
+    sources.ratings = sources.news = "unknown";
+    sources.marketTrendUp = marketTrendUp === null ? "unknown" : "nasdaq";
+    sources.sectorStrong = sectorStrong === null ? "unknown" : "nasdaq";
+  } else {
+    quote = verifiedQuote;
+    daily = mock.mockDailyCandles(symbol);
+    financials = mock.mockFinancials(symbol);
+    valuation = mock.mockValuation(symbol);
+    ratings = mock.mockRatings(symbol);
+    news = mock.mockNews(symbol);
+    for (const key of ["quote", "candlesDaily", "financials", "valuation", "ratings", "news"]) sources[key] = "mock";
+    sources.marketTrendUp = sources.sectorStrong = "unknown";
+  }
+  let indicators;
+  try { indicators = computeIndicators(daily); }
+  catch {
+    throw new ReportError("DATA_UNAVAILABLE", "日線資料格式無效，暫時無法產生報告");
+  }
+  const scoreResult = score({ financials, valuation, ratings, indicators, marketTrendUp, sectorStrong });
   const memo = buildMemo(indicators, daily);
   const plan = buildPlan(indicators, daily);
-  const rules = buildRules(memo);
-  const auditResult = audit(scoreResult, memo, plan);
-  const buyPoints = findBuyPoints(daily);
-  sources.indicators = "derived";
-  sources.scoring = "derived";
-
+  // 入場參考以本次報價為準，不混用上一次日線收盤價。
+  plan.entry = quote.lastPrice;
+  const intraday = real ? [] : mock.mockIntradayCandles(symbol);
+  sources.candlesIntraday = real ? "unknown" : "mock";
+  sources.indicators = sources.scoring = "derived";
   return {
-    quote: quote as StockReport["quote"],
-    score: scoreResult,
-    memo,
-    rules,
-    plan,
-    audit: auditResult,
-    buyPoints,
-    news: news as StockReport["news"],
-    candlesDaily: daily,
-    candlesIntraday: intraday,
-    sources,
+    quote, mode: real ? "real" : "demo", score: scoreResult,
+    memo, rules: buildRules(memo), plan, audit: audit(scoreResult, memo, plan),
+    buyPoints: findBuyPoints(daily), news, candlesDaily: daily, candlesIntraday: intraday, sources,
   };
 }
 
-export async function searchSymbols(q: string) {
-  // 真實搜索：直接查 Nasdaq 該 ticker 的 info，命中即回公司名
-  if (REAL_DATA && /^[A-Za-z.]{1,6}$/.test(q.trim())) {
-    const ticker = q.trim().toUpperCase().replace(/^US\./, "");
-    const info = await nasdaq.fetchQuote(ticker);
-    if (info && info.name) {
-      return [{ symbol: `US.${ticker}`, name: info.name, type: "STOCK" }];
-    }
+export async function searchSymbols(q: string, options: ReportOptions = {}) {
+  const real = options.realData ?? process.env.REAL_DATA !== "false";
+  if (!real) return mock.mockSearch(q.trim());
+  try {
+    const { symbol, quote } = await getDataContext(q, options);
+    return [{ symbol, name: quote.name, type: "STOCK" }];
+  } catch (error) {
+    if (error instanceof ReportError && error.code === "SYMBOL_NOT_FOUND") return [];
+    throw error;
   }
-  return (await futuGet<import("../types").SearchResult[]>(`/quote-api/search?q=${encodeURIComponent(q)}`)) || mock.mockSearch(q);
 }

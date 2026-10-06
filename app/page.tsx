@@ -9,9 +9,9 @@ export default function Home() {
       </p>
       <SearchBox />
       <div className="mt-10 text-xs text-muted text-center max-w-lg">
-        數據來源：富途 REST API（免閘道）× 圖表：TradingView lightweight-charts × 評分：專家 100 分 × Fable 分析增強。
+        數據來源：Nasdaq 公開 API × 圖表：TradingView lightweight-charts × 評分：100 分模型。
         <br />
-        目前為無憑證 demo 模式（mock 數據），填入富途憑證即切真實行情。
+        真實模式不以模擬資料補缺；示範模式會明確標記。缺失資料時暫不提供買入評級。
       </div>
     </main>
   );
