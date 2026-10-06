@@ -31,34 +31,50 @@ function rowVal(rows: { value1: string; [k: string]: unknown }[], name: string, 
   return parseMoney(r[col] as string);
 }
 
-// 即時報價
-export async function fetchQuote(symbol: string): Promise<Quote | null> {
+export class QuoteLookupError extends Error {
+  constructor(public code: "SYMBOL_NOT_FOUND" | "DATA_UNAVAILABLE") {
+    super(code === "SYMBOL_NOT_FOUND" ? "找不到股票代號" : "行情服務暫時不可用，無法驗證股票代號");
+  }
+}
+
+// 區分供應商明確拒絕代號與連線失敗，避免將網路故障誤報成不存在。
+export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
   const ticker = toTicker(symbol);
   try {
     const res = await fetch(
-      `https://api.nasdaq.com/api/quote/${ticker}/info?assetclass=stocks`,
+      `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/info?assetclass=stocks`,
       { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(8000) }
     );
-    if (!res.ok) return null;
-    const d = (await res.json())?.data;
-    if (!d) return null;
+    if (res.status === 400 || res.status === 404) throw new QuoteLookupError("SYMBOL_NOT_FOUND");
+    if (!res.ok) throw new QuoteLookupError("DATA_UNAVAILABLE");
+    const body = await res.json();
+    if (!body?.data) {
+      const message = JSON.stringify(body?.status?.bCodeMessage ?? "");
+      const missing = /invalid (?:symbol|ticker)|(?:symbol|ticker).*(?:not found|does not exist)/i.test(message);
+      throw new QuoteLookupError(missing ? "SYMBOL_NOT_FOUND" : "DATA_UNAVAILABLE");
+    }
+    const d = body.data;
+    if (toTicker(d.symbol ?? "") !== ticker) throw new QuoteLookupError("DATA_UNAVAILABLE");
     const p = d.primaryData || {};
     const last = parseMoney(p.lastSalePrice);
-    const change = parseMoney(p.netChange?.replace(/^\+/, ""));
-    const changePct = parseFloat(String(p.percentageChange || "").replace(/[%+]/g, "")) || 0;
-    const volume = parseMoney(p.volume);
+    if (!Number.isFinite(last) || last <= 0) throw new QuoteLookupError("DATA_UNAVAILABLE");
     return {
       symbol: ticker,
       name: d.companyName || ticker,
       lastPrice: last,
-      change,
-      changePct,
-      volume,
+      change: parseMoney(p.netChange?.replace(/^\+/, "")),
+      changePct: parseFloat(String(p.percentageChange || "").replace(/[%+]/g, "")) || 0,
+      volume: parseMoney(p.volume),
       timestamp: Math.floor(Date.now() / 1000),
     };
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof QuoteLookupError) throw error;
+    throw new QuoteLookupError("DATA_UNAVAILABLE");
   }
+}
+
+export async function fetchQuote(symbol: string): Promise<Quote | null> {
+  try { return await fetchVerifiedQuote(symbol); } catch { return null; }
 }
 
 // 摘要資料：市值、產業、52 週區間（估值推導與產業趨勢用）
@@ -107,7 +123,7 @@ export async function fetchDaily(symbol: string, days = 400): Promise<Candle[] |
     if (!Array.isArray(rows) || rows.length === 0) return null;
 
     const candles: Candle[] = rows
-      .map((r: any) => ({
+      .map((r: Record<string, string>) => ({
         time: parseDateUS(r.date),
         open: parseMoney(r.open),
         high: parseMoney(r.high),
@@ -139,7 +155,7 @@ export async function fetchEtfDaily(etf: string, days = 130): Promise<Candle[] |
     const rows = (await res.json())?.data?.tradesTable?.rows;
     if (!Array.isArray(rows) || rows.length === 0) return null;
     const candles: Candle[] = rows
-      .map((r: any) => ({
+      .map((r: Record<string, string>) => ({
         time: parseDateUS(r.date),
         open: parseMoney(r.open),
         high: parseMoney(r.high),
@@ -183,7 +199,6 @@ export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsR
 
     const revenue = rowVal(inc, "Total Revenue", "value2");
     const revenuePrev = rowVal(inc, "Total Revenue", "value3");
-    const revenue3 = rowVal(inc, "Total Revenue", "value4");
     const netIncome = rowVal(inc, "Net Income", "value2");
     const netIncomePrev = rowVal(inc, "Net Income", "value3");
     const opInc = rowVal(inc, "Operating Income", "value2");
@@ -286,6 +301,6 @@ export async function fetchSectorStrength(sector: string | null): Promise<boolea
 }
 
 // 日內/分時：Nasdaq 免費接口無穩定分時，回傳 null 讓 caller 用日線降級
-export async function fetchIntraday(_symbol: string): Promise<Candle[] | null> {
+export async function fetchIntraday(): Promise<Candle[] | null> {
   return null;
 }
