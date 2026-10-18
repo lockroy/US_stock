@@ -111,7 +111,7 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   sources.candlesIntraday = real ? "unknown" : "mock";
   sources.indicators = sources.scoring = "derived";
   return {
-    quote, mode: real ? "real" : "demo", score: scoreResult,
+    quote, mode: real ? "real" : "demo", score: scoreResult, financials,
     memo, rules: buildRules(memo), plan, audit: audit(scoreResult, memo, plan),
     buyPoints: findBuyPoints(daily), news, newsStatus: newsResult?.status, newsMessage: newsResult?.message, newsFetchedAt: newsResult?.fetchedAt,
     candlesDaily: daily, candlesIntraday: intraday, sources,

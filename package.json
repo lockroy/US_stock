@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
-    "test": "tsx lib/scoring/scoring.test.ts && tsx --test lib/indicators/indicators.test.ts lib/fable/fable.test.ts lib/futu/trust.test.ts lib/futu/data.test.ts lib/search.test.ts lib/news/finnhub.test.ts lib/news/google.test.ts lib/futu/directory.test.ts",
+    "test": "tsx lib/scoring/scoring.test.ts && tsx --test lib/indicators/indicators.test.ts lib/fable/fable.test.ts lib/futu/trust.test.ts lib/futu/data.test.ts lib/search.test.ts lib/news/finnhub.test.ts lib/news/google.test.ts lib/futu/directory.test.ts lib/futu/financials.test.ts",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

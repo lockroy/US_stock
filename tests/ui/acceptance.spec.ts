@@ -1,5 +1,21 @@
 import { test, expect, type Page } from "@playwright/test";
 
+test("financial details distinguish missing EPS from net-income growth and preserve real zero", async ({ page, request }) => {
+  const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
+  const report = await response.json();
+  report.financials = { ...report.financials, epsGrowth: null, netIncomeGrowth: 25, grossMargin: 0, roic: null,
+    notes: { epsGrowth: "EPS 未披露，不以淨利增長代替。", roic: "缺少稅務資料，不假設稅率。" } };
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await page.getByText("財務數值與缺失說明", { exact: true }).click();
+  await expect(page.getByText("EPS 增長：未知／不適用", { exact: true })).toBeVisible();
+  await expect(page.getByText("淨利增長（不是 EPS）：25%", { exact: true })).toBeVisible();
+  await expect(page.getByText("毛利率：0%", { exact: true })).toBeVisible();
+  await expect(page.getByText("簡化 ROIC（推導）：未知／不適用", { exact: true })).toBeVisible();
+  await expect(page.getByText("缺少稅務資料，不假設稅率。", { exact: true })).toBeVisible();
+  await noOverflow(page);
+});
+
 test("Google news displays its publisher, time, source badge and safe external link", async ({ page, request }) => {
   const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
   expect(response.ok()).toBe(true);

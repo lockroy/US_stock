@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Chart } from "@/components/Chart";
-import type { StockReport } from "@/lib/types";
+import type { StockReport, Financials } from "@/lib/types";
 
 import { tierColor } from "@/lib/scoring/presentation";
 
@@ -54,6 +54,13 @@ const SOURCE_PROVENANCE: Record<string, string> = {
   indicators: "lib/indicators/indicators.ts｜由 candlesDaily 本地計算（EMA/RSI/MACD/KD/布林/ATR/20日成交量加權均價）",
   scoring: "lib/scoring/scoring.ts｜本地評分模型（基本面30+估值20+技術30+情緒20=100）",
 };
+
+const FINANCIAL_FIELDS: [keyof Financials, string, string][] = [
+  ["revenueGrowth", "營收增長", "%"], ["epsGrowth", "EPS 增長", "%"],
+  ["netIncomeGrowth", "淨利增長（不是 EPS）", "%"], ["grossMargin", "毛利率", "%"],
+  ["roe", "ROE", "%"], ["roic", "簡化 ROIC（推導）", "%"],
+  ["debtToEquity", "負債權益比", ""], ["fcf", "自由現金流", " 千美元"],
+];
 
 function Block({ n, title, fable, children }: { n: number; title: string; fable?: boolean; children: React.ReactNode }) {
   return (
@@ -187,12 +194,25 @@ function ReportView({ symbol }: { symbol: string }) {
                 <td className="py-1 text-muted">{f.dimension}</td>
                 <td>{f.sub}</td>
                 <td className="text-right">
-                  {f.available === false ? "未知" : f.score} / {f.max}
+                  {f.available === false ? f.availableMax ? `${f.score}（部分資料）` : "未知" : f.score} / {f.max}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {r.financials && <details className="mt-3 text-sm">
+          <summary className="cursor-pointer text-accent">財務數值與缺失說明</summary>
+          <p className="text-muted text-xs my-2">財年期末：{r.financials.periodEnd ?? (r.mode === "demo" ? "示範資料" : "未知")}。以下包括披露數值及推導值，未知項目不以零補缺。</p>
+          <dl className="space-y-2">
+            {FINANCIAL_FIELDS.map(([key, label, unit]) => {
+              const value = r.financials?.[key];
+              return <div key={key}>
+                <dt className="font-medium">{label}：{typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit}` : "未知／不適用"}</dt>
+                {r.financials?.notes?.[key] && <dd className="text-muted text-xs">{r.financials.notes[key]}</dd>}
+              </div>;
+            })}
+          </dl>
+        </details>}
       </Block>
 
       {/* 4 研究備忘錄 */}

@@ -14,18 +14,23 @@ function scale(ratio: number, max: number): number {
 
 // ---- 基本面 30 ----
 export function scoreFundamental(f: Financials): { score: number; factors: FactorScore[] } {
-  const growth = scale((Math.max(0, f.revenueGrowth) + Math.max(0, f.epsGrowth)) / 30, 10); // 各 15% 成長 → 滿分
-  const profit = scale((Math.max(0, f.grossMargin) + Math.max(0, f.roe) + Math.max(0, f.roic)) / 150, 10);
-  const structure = (f.fcf > 0 ? 5 : 0) + (f.debtToEquity >= 0 && f.debtToEquity < 1 ? 5 : 0);
-  const score = growth + profit + structure;
-  return {
-    score,
-    factors: [
-      { dimension: "基本面", sub: "營收/EPS 成長", score: +growth.toFixed(1), max: 10 },
-      { dimension: "基本面", sub: "獲利能力(毛利/ROE/ROIC)", score: +profit.toFixed(1), max: 10 },
-      { dimension: "基本面", sub: "資產負債與 FCF", score: +structure.toFixed(1), max: 10 },
-    ],
+  const valid = (n: number | null): n is number => typeof n === "number" && Number.isFinite(n);
+  const factor = (sub: string, values: [string, number | null, number][], rawScore: number): FactorScore => {
+    const availableMax = values.reduce((sum, [, value, weight]) => sum + (valid(value) ? weight : 0), 0);
+    const missingInputs = values.filter(([, value]) => !valid(value)).map(([name]) => name);
+    return { dimension: "基本面", sub, score: +Math.min(availableMax, rawScore).toFixed(1), max: 10,
+      available: missingInputs.length === 0, availableMax, missingInputs };
   };
+  const positive = (n: number | null) => valid(n) ? Math.max(0, n) : 0;
+  const factors = [
+    factor("營收/EPS 成長", [["營收增長", f.revenueGrowth, 5], ["EPS 增長", f.epsGrowth, 5]],
+      scale((positive(f.revenueGrowth) + positive(f.epsGrowth)) / 30, 10)),
+    factor("獲利能力(毛利/ROE/ROIC)", [["毛利率", f.grossMargin, 10 / 3], ["ROE", f.roe, 10 / 3], ["ROIC", f.roic, 10 / 3]],
+      scale((positive(f.grossMargin) + positive(f.roe) + positive(f.roic)) / 150, 10)),
+    factor("資產負債與 FCF", [["自由現金流", f.fcf, 5], ["負債權益比", f.debtToEquity, 5]],
+      (valid(f.fcf) && f.fcf > 0 ? 5 : 0) + (valid(f.debtToEquity) && f.debtToEquity >= 0 && f.debtToEquity < 1 ? 5 : 0)),
+  ];
+  return { score: factors.reduce((sum, item) => sum + item.score, 0), factors };
 }
 
 // ---- 估值 20（校準版 2026-08-29）----
@@ -169,13 +174,13 @@ export function score(input: ScoreInput): ScoreResult {
     factors: [{ dimension, sub: "資料未知（不計分）", score: 0, max, available: false }],
   });
   const f = input.financials ? scoreFundamental(input.financials) : unavailable("基本面", 30);
-  const v = input.valuation ? scoreValuation(input.valuation, input.financials?.roe) : unavailable("估值", 20);
+  const v = input.valuation ? scoreValuation(input.valuation, input.financials?.roe ?? undefined) : unavailable("估值", 20);
   const t = scoreTechnical(input.indicators);
   const s = scoreSentiment(input.ratings, input.marketTrendUp, input.sectorStrong);
-  const factors = [...f.factors, ...v.factors, ...t.factors, ...s.factors];
+  const factors: FactorScore[] = [...f.factors, ...v.factors, ...t.factors, ...s.factors];
   const total = Math.round(f.score + v.score + t.score + s.score);
-  const missing = factors.filter(f => f.available === false).map(f => `${f.dimension}：${f.sub}`);
-  const availablePoints = factors.filter(f => f.available !== false).reduce((sum, f) => sum + f.max, 0);
+  const missing = factors.filter(f => f.available === false).map(f => `${f.dimension}：${f.missingInputs?.length ? f.missingInputs.join("、") : f.sub}`);
+  const availablePoints = +factors.reduce((sum, f) => sum + (f.availableMax ?? (f.available === false ? 0 : f.max)), 0).toFixed(2);
   return {
     total: Math.max(0, Math.min(100, total)),
     tier: missing.length ? "資料不足 / 暫不評級" : tierOf(total),

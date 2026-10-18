@@ -24,11 +24,20 @@ function parseDateUS(s: string): number {
   return Math.floor(Date.UTC(y, m - 1, d) / 1000);
 }
 
-// 表格工具：從 {value1..value5} rows 中按行名取值（v2=最新期，v3=去年同期）
-function rowVal(rows: { value1: string; [k: string]: unknown }[], name: string, col: string): number {
-  const r = rows.find((x) => x.value1 === name);
-  if (!r) return 0;
-  return parseMoney(r[col] as string);
+// 財務使用嚴格解析：空白、N/A、缺欄位或非數字都保留未知。
+export function parseFinancialNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || !value.trim()) return null;
+  let text = value.trim().replace(/[$,%\s]/g, "");
+  if (/^\(.*\)$/.test(text)) text = "-" + text.slice(1, -1);
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return null;
+  const result = Number(text);
+  return Number.isFinite(result) ? result : null;
+}
+
+type FinancialRow = { value1?: unknown; [key: string]: unknown };
+function rowVal(rows: FinancialRow[], name: string, col: string): number | null {
+  return parseFinancialNumber(rows.find(row => row.value1 === name)?.[col]);
 }
 
 export class QuoteLookupError extends Error {
@@ -175,85 +184,107 @@ export async function fetchEtfDaily(etf: string, days = 130): Promise<Candle[] |
 // 全部數值推導自 Nasdaq 年報四表（單位：千美元，比率為 %）
 export interface NasdaqFinancialsRaw {
   fin: Financials;
-  revenue: number; // 千美元（最新財年）
-  netIncome: number; // 千美元
-  totalEquity: number; // 千美元
-  totalDebt: number; // 千美元
-  cash: number; // 千美元
+  revenue: number | null; // 千美元
+  netIncome: number | null;
+  totalEquity: number | null;
+  totalDebt: number | null;
+  cash: number | null;
 }
-export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsRaw | null> {
-  const ticker = toTicker(symbol);
-  try {
-    const res = await fetch(
-      `https://api.nasdaq.com/api/company/${ticker}/financials?frequency=1`,
-      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(10000) }
-    );
-    if (!res.ok) return null;
-    const d = (await res.json())?.data;
-    if (!d || !d.incomeStatementTable?.rows) return null;
 
-    const inc: { value1: string; [k: string]: unknown }[] = d.incomeStatementTable.rows;
-    const cf: { value1: string; [k: string]: unknown }[] = d.cashFlowTable?.rows || [];
-    const bs: { value1: string; [k: string]: unknown }[] = d.balanceSheetTable?.rows || [];
-    const ratios: { value1: string; [k: string]: unknown }[] = d.financialRatiosTable?.rows || [];
+const known = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n);
+const addKnown = (a: number | null, b: number | null) => known(a) && known(b) ? a + b : null;
+const growthRate = (current: number | null, previous: number | null) =>
+  known(current) && known(previous) && previous > 0 ? (current - previous) / previous * 100 : null;
 
-    const revenue = rowVal(inc, "Total Revenue", "value2");
-    const revenuePrev = rowVal(inc, "Total Revenue", "value3");
-    const netIncome = rowVal(inc, "Net Income", "value2");
-    const netIncomePrev = rowVal(inc, "Net Income", "value3");
-    const opInc = rowVal(inc, "Operating Income", "value2");
-    const ebt = rowVal(inc, "Earnings Before Tax", "value2");
-    const tax = rowVal(inc, "Income Tax", "value2");
-
-    const cfo = rowVal(cf, "Net Cash Flow-Operating", "value2");
-    const capex = Math.abs(rowVal(cf, "Capital Expenditures", "value2"));
-    const fcf = cfo - capex;
-
-    const equity = rowVal(bs, "Total Equity", "value2");
-    const stDebt = rowVal(bs, "Short-Term Debt / Current Portion of Long-Term Debt", "value2");
-    const ltDebt = rowVal(bs, "Long-Term Debt", "value2");
-    const cash = rowVal(bs, "Cash and Cash Equivalents", "value2") + rowVal(bs, "Short-Term Investments", "value2");
-    const totalDebt = stDebt + ltDebt;
-
-    const grossMargin = ratios.find((r) => r.value1 === "Gross Margin")
-      ? parseMoney(ratios.find((r) => r.value1 === "Gross Margin")!.value2 as string)
-      : revenue > 0 ? (rowVal(inc, "Gross Profit", "value2") / revenue) * 100 : 0;
-    const roe = ratios.find((r) => r.value1 === "After Tax ROE")
-      ? parseMoney(ratios.find((r) => r.value1 === "After Tax ROE")!.value2 as string)
-      : equity > 0 ? (netIncome / equity) * 100 : 0;
-
-    // ROIC = NOPAT / 投入資本（總債務 + 權益）；NOPAT = 營業利益 × (1 - 有效稅率)
-    const taxRate = ebt > 0 ? Math.min(0.6, Math.max(0, tax / ebt)) : 0.21;
-    const invested = totalDebt + equity;
-    const roic = invested > 0 && opInc > 0 ? (opInc * (1 - taxRate) / invested) * 100 : 0;
-
-    const fin: Financials = {
-      revenueGrowth: revenuePrev > 0 ? ((revenue - revenuePrev) / revenuePrev) * 100 : 0,
-      epsGrowth: netIncomePrev > 0 && netIncome > 0 ? ((netIncome - netIncomePrev) / netIncomePrev) * 100 : 0, // 淨利增長代理（Nasdaq 無 EPS 行）
-      grossMargin,
-      roe,
-      roic,
-      debtToEquity: equity > 0 ? totalDebt / equity : 99,
-      fcf, // 千美元（絕對值）
-    };
-    return { fin, revenue, netIncome, totalEquity: equity, totalDebt, cash };
-  } catch {
-    return null;
+export function parseFinancialData(data: unknown): NasdaqFinancialsRaw | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, { rows?: FinancialRow[]; headers?: Record<string, string> } | undefined>;
+  const income = d.incomeStatementTable;
+  if (!Array.isArray(income?.rows) || !income.rows.length) return null;
+  const inc = income.rows;
+  const periodEnd = income.headers?.value2;
+  const previousPeriod = income.headers?.value3;
+  const year = (date?: string) => date && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(date) ? Number(date.split("/")[2]) : null;
+  const comparableYears = year(periodEnd) !== null && year(previousPeriod) !== null
+    && year(periodEnd)! - year(previousPeriod)! === 1;
+  // 缺少或不一致的表格日期不拼接成同一財年。
+  const samePeriod = (key: string): FinancialRow[] => {
+    const table = d[key];
+    return periodEnd && table?.headers?.value2 === periodEnd && Array.isArray(table.rows) ? table.rows : [];
+  };
+  const cf = samePeriod("cashFlowTable");
+  const bs = samePeriod("balanceSheetTable");
+  const ratios = samePeriod("financialRatiosTable");
+  const revenue = rowVal(inc, "Total Revenue", "value2");
+  const revenuePrev = rowVal(inc, "Total Revenue", "value3");
+  const netIncome = rowVal(inc, "Net Income", "value2");
+  const netIncomePrev = rowVal(inc, "Net Income", "value3");
+  const opInc = rowVal(inc, "Operating Income", "value2");
+  const ebt = rowVal(inc, "Earnings Before Tax", "value2");
+  const tax = rowVal(inc, "Income Tax", "value2");
+  const cfo = rowVal(cf, "Net Cash Flow-Operating", "value2");
+  const capex = rowVal(cf, "Capital Expenditures", "value2");
+  const fcf = known(cfo) && known(capex) ? cfo - Math.abs(capex) : null;
+  const equity = rowVal(bs, "Total Equity", "value2");
+  const totalDebt = addKnown(rowVal(bs, "Short-Term Debt / Current Portion of Long-Term Debt", "value2"), rowVal(bs, "Long-Term Debt", "value2"));
+  const cash = addKnown(rowVal(bs, "Cash and Cash Equivalents", "value2"), rowVal(bs, "Short-Term Investments", "value2"));
+  const grossProfit = rowVal(inc, "Gross Profit", "value2");
+  const grossMargin = rowVal(ratios, "Gross Margin", "value2")
+    ?? (known(grossProfit) && known(revenue) && revenue > 0 ? grossProfit / revenue * 100 : null);
+  const roe = rowVal(ratios, "After Tax ROE", "value2")
+    ?? (known(netIncome) && known(equity) && equity > 0 ? netIncome / equity * 100 : null);
+  const taxRate = known(ebt) && ebt > 0 && known(tax) ? tax / ebt : null;
+  const invested = addKnown(totalDebt, equity);
+  // 保留實際有效稅率，不套 21% 或夾限；負營業利益亦照實計算。
+  const roic = known(taxRate) && known(opInc) && known(invested) && invested > 0
+    ? opInc * (1 - taxRate) / invested * 100 : null;
+  const fin: Financials = {
+    revenueGrowth: comparableYears ? growthRate(revenue, revenuePrev) : null,
+    epsGrowth: null,
+    netIncomeGrowth: comparableYears ? growthRate(netIncome, netIncomePrev) : null,
+    grossMargin, roe, roic,
+    debtToEquity: known(totalDebt) && known(equity) && equity > 0 ? totalDebt / equity : null,
+    fcf, periodEnd,
+    notes: {
+      epsGrowth: "此財務端點未提供已核對的每股盈利資料；EPS 增長未知，不以淨利增長代替。",
+      netIncomeGrowth: "按本期與上期淨利計算，並非 EPS 增長；上期非正數時不計增長率。",
+      revenueGrowth: "按本期與上期營收計算；上期非正數或缺值時不適用。",
+      grossMargin: "優先使用披露毛利率；否則以毛利÷營收計算，缺輸入時未知。",
+      roe: "優先使用披露 ROE；否則為淨利÷期末權益，並非平均權益 ROE。",
+      roic: "簡化 ROIC＝營業利益×(1−實際有效稅率)÷期末(債務＋權益)，不是公司披露 ROIC；輸入不足或稅前盈利非正數時未知。",
+      debtToEquity: "短期及長期債務÷期末權益；缺輸入或權益非正數時不適用。",
+      fcf: "營運現金流−資本支出絕對值，單位為千美元；兩者必須有披露數值。",
+    },
+  };
+  for (const key of ["revenueGrowth", "epsGrowth", "netIncomeGrowth", "grossMargin", "roe", "roic", "debtToEquity", "fcf"] as const) {
+    if (!known(fin[key])) fin[key] = null;
   }
+  if (![revenue, netIncome, equity, totalDebt, cash, fin.grossMargin, fin.roe, fcf].some(known)) return null;
+  return { fin, revenue, netIncome, totalEquity: equity, totalDebt, cash };
 }
 
-// 估值推導：市值（summary）+ 財務（financials）→ PE/PEG/PB/PS/FCF yield/EV-Sales
+export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsRaw | null> {
+  try {
+    const res = await fetch(`https://api.nasdaq.com/api/company/${encodeURIComponent(toTicker(symbol))}/financials?frequency=1`,
+      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    return parseFinancialData((await res.json())?.data);
+  } catch { return null; }
+}
+
+// 估值只使用已知、有限且適用的輸入，不把缺債務／現金視為零。
 export function deriveValuation(marketCap: number, raw: NasdaqFinancialsRaw | null): Valuation | null {
-  if (!raw || marketCap <= 0) return null;
+  if (!raw || !Number.isFinite(marketCap) || marketCap <= 0) return null;
   const { revenue, netIncome, totalEquity, totalDebt, cash, fin } = raw;
-  const pe = netIncome > 0 ? marketCap / (netIncome * 1000) : null; // 千美元 → 美元
-  const peg = pe != null && fin.epsGrowth > 0 ? pe / fin.epsGrowth : null;
-  const pb = totalEquity > 0 ? marketCap / (totalEquity * 1000) : null;
-  const ps = revenue > 0 ? marketCap / (revenue * 1000) : null;
-  const fcfYield = fin.fcf > 0 ? (fin.fcf * 1000) / marketCap * 100 : null;
-  const ev = marketCap + totalDebt * 1000 - cash * 1000;
-  const evSales = revenue > 0 ? ev / (revenue * 1000) : null;
-  return { pe, peg, pb, fcfYield, ps, evSales };
+  const pe = known(netIncome) && netIncome > 0 ? marketCap / (netIncome * 1000) : null;
+  const peg = pe !== null && known(fin.epsGrowth) && fin.epsGrowth > 0 ? pe / fin.epsGrowth : null;
+  const pb = known(totalEquity) && totalEquity > 0 ? marketCap / (totalEquity * 1000) : null;
+  const ps = known(revenue) && revenue > 0 ? marketCap / (revenue * 1000) : null;
+  const fcfYield = known(fin.fcf) ? fin.fcf * 1000 / marketCap * 100 : null;
+  const ev = known(totalDebt) && known(cash) ? marketCap + totalDebt * 1000 - cash * 1000 : null;
+  const evSales = known(ev) && known(revenue) && revenue > 0 ? ev / (revenue * 1000) : null;
+  const finite = (value: number | null) => known(value) ? value : null;
+  return { pe: finite(pe), peg: finite(peg), pb: finite(pb), fcfYield: finite(fcfYield), ps: finite(ps), evSales: finite(evSales) };
 }
 
 // 產業 → SPDR 產業 ETF 映射（相對強弱用）

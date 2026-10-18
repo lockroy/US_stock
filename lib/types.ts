@@ -29,13 +29,16 @@ export interface SearchResult {
 }
 
 export interface Financials {
-  revenueGrowth: number; // YoY %
-  epsGrowth: number; // YoY %
-  grossMargin: number; // %
-  roe: number; // %
-  roic: number; // %
-  debtToEquity: number;
-  fcf: number; // per share or absolute
+  revenueGrowth: number | null; // YoY %
+  epsGrowth: number | null; // 真正 EPS YoY %，不得以淨利增長代替
+  netIncomeGrowth?: number | null; // 淨利 YoY %，獨立顯示，不用作 EPS 或 PEG
+  grossMargin: number | null; // %
+  roe: number | null; // %
+  roic: number | null; // %
+  debtToEquity: number | null;
+  fcf: number | null; // Nasdaq: 千美元
+  periodEnd?: string;
+  notes?: Record<string, string>;
 }
 
 export interface Valuation {
@@ -88,6 +91,8 @@ export interface FactorScore {
   score: number;
   max: number;
   available?: boolean;
+  availableMax?: number;
+  missingInputs?: string[];
 }
 
 export interface ScoreResult {
@@ -148,6 +153,7 @@ export interface StockReport {
   quote: Quote;
   mode: "real" | "demo";
   score: ScoreResult;
+  financials?: Financials | null;
   memo: ResearchMemo;
   rules: TradeRule[];
   plan: TradePlan;
