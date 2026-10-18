@@ -18,7 +18,7 @@ export async function fetchCompanyNews(symbol: string, options: {
   try {
     const response = await (options.fetcher ?? fetch)(url, {
       headers: { "X-Finnhub-Token": key, Accept: "application/json" },
-      signal: AbortSignal.timeout(8000), redirect: "error", cache: "no-store",
+      signal: AbortSignal.timeout(8000), redirect: "manual", cache: "no-store",
     });
     if (response.status === 401 || response.status === 403) return fail("unauthorized", "Finnhub 新聞授權失敗，請檢查 API key 及方案權限");
     if (response.status === 429) return fail("rate_limited", "Finnhub 新聞請求額度已達上限，請稍後再試");

@@ -46,7 +46,8 @@ export async function fetchGoogleNews(symbol: string, options: { fetcher?: typeo
   try {
     const response = await (options.fetcher ?? fetch)(url, {
       headers: { Accept: "application/rss+xml, application/xml, text/xml" },
-      signal: AbortSignal.timeout(8000), redirect: "error", next: { revalidate: 300 },
+      // workerd 不支援 redirect:"error"；manual 不跟隨重新導向，3xx 由下方 !ok 拒絕。
+      signal: AbortSignal.timeout(8000), redirect: "manual", next: { revalidate: 300 },
     });
     if (response.status === 429) return fail("rate_limited", "Google 新聞暫時限制請求，請稍後再試");
     if (!response.ok) return fail("unavailable", "Google 新聞暫時無法讀取，請稍後再試");

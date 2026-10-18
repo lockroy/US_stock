@@ -41,6 +41,7 @@ test("Google RSS needs no credentials, uses ticker search and limits to ten arti
   const result = await fetchGoogleNews(" us.aapl ", { now, fetcher: async (input, init) => {
     const url = new URL(String(input));
     assert.equal(url.origin, "https://news.google.com");
+    assert.equal(init?.redirect, "manual");
     assert.equal(url.searchParams.get("q"), "AAPL stock when:7d");
     assert.equal(new Headers(init?.headers).has("Authorization"), false);
     return new Response(rss(Array.from({ length: 12 }, (_, i) => item(String(i))).join("")));
@@ -66,6 +67,19 @@ test("no results, quota, HTTP errors, oversized responses and network failure re
 
 test("invalid tickers do not request Google", async () => {
   assert.equal((await fetchGoogleNews("../bad", { fetcher: async () => { throw new Error("must not fetch"); } })).status, "unavailable");
+});
+
+test("Workers-compatible fetch does not follow redirects or misreport them as empty news", async () => {
+  let calls = 0;
+  const result = await fetchGoogleNews("AAPL", { fetcher: async (_input, init) => {
+    calls++;
+    if (init?.redirect !== "manual") throw new TypeError("Workers only supports follow/manual");
+    return new Response(null, { status: 302, headers: { Location: "https://example.com/consent" } });
+  } });
+  assert.equal(calls, 1);
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.source, "unknown");
+  assert.deepEqual(result.data, []);
 });
 
 test("report and independent endpoint share real news; failure never changes scores or fabricates news", async () => {

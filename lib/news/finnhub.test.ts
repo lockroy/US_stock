@@ -33,7 +33,7 @@ test("news request uses normalized ticker, seven UTC days, server header and saf
     assert.equal(url.searchParams.get("to"), "2026-10-18");
     assert.equal(url.searchParams.has("token"), false);
     assert.equal(new Headers(init?.headers).get("X-Finnhub-Token"), "test-key");
-    assert.equal(init?.redirect, "error");
+    assert.equal(init?.redirect, "manual");
     return Response.json([row, row, { ...row, url: "javascript:alert(1)" }, { ...row, datetime: time + 99999 },
       { ...row, url: "https://example.com/new", datetime: time + 100 }, { ...row, datetime: 1 }, { ...row, headline: "" }]);
   } });
