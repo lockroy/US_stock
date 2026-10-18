@@ -5,6 +5,7 @@ export interface SearchState {
   loading: boolean;
   error: string | null;
   mode?: "real" | "demo";
+  message?: string;
 }
 
 // 同時取消請求與檢查代次：即使 fetch／供應商忽略 abort，舊回應也不能改寫畫面。
@@ -36,7 +37,7 @@ export function createSearchController(
       try {
         const response = await request(query, controller.signal);
         if (generation !== current || controller.signal.aborted) return;
-        update({ items: response.data ?? [], loading: false, error: null, mode: response.mode });
+        update({ items: response.data ?? [], loading: false, error: null, mode: response.mode, ...(response.message ? { message: response.message } : {}) });
       } catch (error) {
         if (generation !== current || controller.signal.aborted) return;
         update({ items: [], loading: false, error: error instanceof Error ? error.message : "暫時無法搜尋" });

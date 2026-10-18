@@ -25,6 +25,7 @@ export interface SearchResult {
   symbol: string;
   name: string;
   type: string;
+  exchange?: string;
 }
 
 export interface Financials {
@@ -140,7 +141,7 @@ export interface BuyPoint {
   reason: string;
 }
 
-export type DataSource = "nasdaq" | "mock" | "derived" | "proxy" | "unknown";
+export type DataSource = "nasdaq" | "finnhub" | "google_news" | "mock" | "derived" | "proxy" | "unknown";
 
 // 完整報告
 export interface StockReport {
@@ -153,6 +154,9 @@ export interface StockReport {
   audit: AuditResult;
   buyPoints: BuyPoint[];
   news: NewsItem[];
+  newsStatus?: import("./news/types").NewsResult["status"];
+  newsMessage?: string;
+  newsFetchedAt?: number;
   candlesDaily: Candle[];
   candlesIntraday: Candle[];
   sources: Record<string, DataSource>; // 各數據塊實際來源（nasdaq=真實/mock=模擬/derived=推導/proxy=代理）
@@ -167,5 +171,7 @@ export interface DataResponse<T> {
   query?: string;
   range?: Range;
   inputSource?: DataSource;
+  status?: import("./news/types").NewsResult["status"];
+  fetchedAt?: number;
   message?: string;
 }

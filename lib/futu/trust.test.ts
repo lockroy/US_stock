@@ -11,6 +11,7 @@ import { audit } from "../fable/fable";
 
 const daily = mock.mockDailyCandles("US.AAPL");
 const quote = { ...mock.mockQuote("US.AAPL"), symbol: "AAPL" };
+const unavailableNews = async () => ({ data: [], source: "unknown" as const, status: "unavailable" as const, message: "新聞讀取失敗" });
 const provider: typeof nasdaq = {
   ...nasdaq,
   fetchVerifiedQuote: async () => quote,
@@ -47,7 +48,7 @@ test("unknown macro inputs earn no optimistic points; observed weakness stays di
 });
 
 test("real report preserves unknowns, exposes weighted completeness and suppresses tier", async () => {
-  const report = await buildReport(" aapl ", { provider, realData: true });
+  const report = await buildReport(" aapl ", { provider, newsProvider: unavailableNews, realData: true });
   assert.equal(report.mode, "real");
   assert.equal(report.score.completeness.percent, 30);
   assert.equal(report.score.tier, "資料不足 / 暫不評級");
@@ -65,7 +66,7 @@ test("real report preserves unknowns, exposes weighted completeness and suppress
 
 test("real report never replaces missing daily prices with generated candles", async () => {
   for (const candles of [null, daily.slice(0, 199)]) {
-    await assert.rejects(buildReport("AAPL", { realData: true, provider: { ...provider, fetchDaily: async () => candles } }),
+    await assert.rejects(buildReport("AAPL", { newsProvider: unavailableNews, realData: true, provider: { ...provider, fetchDaily: async () => candles } }),
       (e: unknown) => e instanceof ReportError && e.status === 503);
   }
 });
@@ -81,7 +82,7 @@ test("explicit demo is labelled and never calls the real provider", async () => 
 
 test("invalid syntax is rejected before any provider lookup", async () => {
   for (const symbol of ["THIS_IS_NOT_A_STOCK", " ", "AAPL&symbol=TSLA", "../AAPL"]) {
-    await assert.rejects(buildReport(symbol, { provider, realData: true }), (e: unknown) => e instanceof ReportError && e.status === 400);
+    await assert.rejects(buildReport(symbol, { provider, newsProvider: unavailableNews, realData: true }), (e: unknown) => e instanceof ReportError && e.status === 400);
   }
 });
 
@@ -101,7 +102,7 @@ test("quote lookup distinguishes missing symbols, network denial and unusable re
 });
 
 test("provider-confirmed missing symbol does not become a fake report", async () => {
-  await assert.rejects(buildReport("ZZZZZZ", { realData: true, provider: { ...provider, fetchVerifiedQuote: async () => { throw new nasdaq.QuoteLookupError("SYMBOL_NOT_FOUND"); } } }),
+  await assert.rejects(buildReport("ZZZZZZ", { newsProvider: unavailableNews, realData: true, provider: { ...provider, fetchVerifiedQuote: async () => { throw new nasdaq.QuoteLookupError("SYMBOL_NOT_FOUND"); } } }),
     (e: unknown) => e instanceof ReportError && e.status === 404);
 });
 
@@ -161,7 +162,7 @@ test("missing valuation fields reduce completeness without inflating known score
 test("malformed real candles produce a data-unavailable error instead of numerical signals", async () => {
   for (const patch of [{ close: NaN }, { high: 0 }, { time: daily[248].time }]) {
     const broken = [...daily.slice(0, 249), { ...daily[249], ...patch }];
-    await assert.rejects(buildReport("AAPL", { realData: true, provider: { ...provider, fetchDaily: async () => broken } }),
+    await assert.rejects(buildReport("AAPL", { newsProvider: unavailableNews, realData: true, provider: { ...provider, fetchDaily: async () => broken } }),
       (e: unknown) => e instanceof ReportError && e.status === 503);
   }
 });

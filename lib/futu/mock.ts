@@ -145,10 +145,10 @@ export function mockRatings(symbol: string): Ratings {
 }
 
 export function mockSearch(q: string): SearchResult[] {
+  q = q.trim().replace(/^US\./i, "");
   const syms = Object.keys(NAMES);
   const matched = syms.filter((s) => s.includes(q.toUpperCase()) || NAMES[s].toLowerCase().includes(q.toLowerCase()));
-  const list = matched.length ? matched : [q.toUpperCase()];
-  return list.slice(0, 8).map((s) => ({ symbol: `US.${s}`, name: NAMES[s] || s, type: "STOCK" }));
+  return matched.slice(0, 8).map((s) => ({ symbol: `US.${s}`, name: NAMES[s], type: "STOCK" }));
 }
 
 export function mockNews(symbol: string): NewsItem[] {

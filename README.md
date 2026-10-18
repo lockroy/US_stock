@@ -24,7 +24,8 @@ npm run lint         # ESLint CLI + Next.js／TypeScript 規則
 | 即時報價 | Nasdaq 公開 API | ✅ 真實 |
 | 日線 K 線 | Nasdaq 公開 API | 至少 200 根有效日線才產生報告 |
 | 財務/估值 | Nasdaq 年報 / 推導 | 無法取得時標記未知、不計分 |
-| 評級/新聞/分時 | 尚未接入真實源 | 真實模式標記未知，不生成假資料 |
+| 個股新聞 | Google News RSS | 免費、免 API key；失敗標記未知 |
+| 評級/分時 | 尚未接入真實源 | 真實模式標記未知，不生成假資料 |
 
 `/api/report` 預設使用真實模式。`REAL_DATA=false npm run dev` 明確啟用示範模式，報告會顯示模擬資料提示。真實模式不自動退回 mock：代號格式錯誤回傳 400，供應商明確表示不存在回傳 404；連線失敗、報價不可用或日線不足回傳 503。
 
@@ -52,16 +53,34 @@ npm run lint         # ESLint CLI + Next.js／TypeScript 規則
 `data` 為原本的資料物件／陣列，呼叫者需要由 `body.data` 取出，不再直接讀取裸物件／陣列。現有搜尋介面已同步更新；`/api/report` 保留完整報告格式，以 `mode` 與 `sources` 標記資料。
 
 - 所有股票資料 API 共用代號格式及真實模式存在性驗證。`REAL_DATA=false` 時所有入口都使用明確示範模式，不連線取真實資料。
-- 真實新聞／分時尚未接入時回傳 `source: "unknown", data: []`；評級及缺失財務／估值回傳 `source: "unknown", data: null`。連線失敗或日線不可用回傳 503，代號不存在回傳 404，格式或 range 錯誤回傳 400，皆不退回 mock。
+- 真實分時尚未接入時回傳 `source: "unknown", data: []`；新聞依 Finnhub 狀態回傳（見下節）。評級及缺失財務／估值回傳 `source: "unknown", data: null`。股票驗證連線失敗或日線不可用回傳 503，代號不存在回傳 404，格式或 range 錯誤回傳 400，皆不退回 mock。
 - `candles?range=day|week|month|1D`：週線以 UTC 週一、月線以 UTC 一日為日期標籤，使用首筆 open、最高 high、最低 low、末筆 close、成交量總和。聚合結果以 `source: "derived"` 標記，`inputSource` 說明底層為 Nasdaq 或 mock。首末期間可能只有部分日線。
-- `/api/search?q=AAPL` 回傳 `{query, mode, source, data: [...]}`。真實模式目前支援代號查詢；供應商確認無結果回傳空陣列，服務不可用回傳 503。示範模式可搜尋內建公司名稱。
+- `/api/search?q=AAPL` 回傳 `{query, mode, source, data: [...]}`。真實模式支援代號及英文公司名稱；由 Nasdaq 免費 screener 的 NASDAQ／NYSE／AMEX 名單查詢，最多十項結果。無匹配回傳空陣列及訊息，服務不可用或名單不完整回傳 503。示範模式只搜尋內建代號及公司名稱，不製造未知代號結果。
 - 搜尋介面延遲 250ms 發出請求，取消舊請求並忽略過期結果／錯誤，清空輸入、關閉建議或離開頁面時停止待處理工作。
 
 ESLint 使用相容於現有 Next.js 插件 peer requirements 的 9.x 與 `eslint-config-next`，不再使用 Next 16 已移除的 `next lint`。Lockfile 的套件 URL 已改為官方 HTTPS registry，保留所有原有套件版本與完整性雜湊。
 
+## 免費個人研究流程
+
+第一階段供個人非商業使用：搜尋代號 → 真實資料及 Google News RSS → 清楚顯示資料缺失。以 AAPL、MSFT、TSLA 驗收；自動選股、交易週期及交易計畫增強留待下一階段。
+
+Google News RSS 為預設新聞來源，免費，毋須 API key。雲端允許 HTTPS 存取 `news.google.com` 即可；其他真實資料仍需 `api.nasdaq.com`。Finnhub adapter 保留作後續選擇，不會自動呼叫，也不需配置其憑證。
+
+報告與 `/api/news?symbol=AAPL` 共用最近七日的代號搜尋結果，去重、按發布時間排序、最多十條；報告顯示前三條的標題、出版來源及時間。連結保留 Google 跳轉至出版商，不抓取全文。關鍵字搜尋可能包含不相關新聞，不參與評分或買入訊號。RSS 依 Google feed 聲明限個人、非商業 feed reader 用途；不作公開新聞再發布服務。
+
+`status: ready|empty` 表示成功讀取（包括確認沒有近期新聞），`source: google_news`；`unavailable|rate_limited` 表示失敗，`source: unknown`，資料為空陣列，並提供 `message`。報告繼續顯示其他資料，失敗不補假新聞。`fetchedAt`／`newsFetchedAt` 為本次讀取時間，RSS 請求快取最多五分鐘；各篇發布時間分開顯示。示範模式維持 mock，不連外。
+
+## 第二階段：按需搜尋全美股
+
+全美股指搜尋範圍，不是定時全市場掃描。首次查詢才讀取三個交易所的股票名單，快取一小時，並合併同時發出的請求；搜尋不取得每隻股票的報價、財務或新聞。選擇結果或以 Enter 確認唯一結果後，才開啟該股票報告。輸入有多個匹配時需自行選擇。
+
+支援代號前綴、大小寫、`US.` 前綴、英文公司名稱關鍵字，以及 `BRK/B` → `BRK.B` 股份類別。排序先完全相同代號，再代號前綴及公司名稱。一般以 NYSE、Nasdaq、NYSE American 普通股／ADR 為目標；根據供應商證券名稱排除 ETF、基金、優先股、認股權證、units、rights 及債券。供應商沒有完整證券類別欄位，名稱分類可能遺漏，並非獨立驗證的完整證券主檔；不涵蓋 OTC，也不保證每隻股票都有足夠財務或歷史資料。
+
+名單缺頁、任一交易所請求失敗或格式錯誤會提示服務不可用，不偽裝成查無股票。查無結果與無效輸入分開提示；清空、關閉或修改輸入會取消搜尋及待處理的 Enter 導航。
+
 ## 畫面驗收
 
-`npm run test:ui` 先建置正式版，再啟動示範及真實模式，使用 Chromium 驗收桌面與 390px 手機版。涵蓋搜尋、報告、圖表繪製、資料來源展開、橫向溢出、錯誤提示及取消搜尋，共 28 項檢查。真實模式需要能連線至 `api.nasdaq.com`。
+`npm run test:ui` 先建置正式版，再啟動示範及真實模式，使用 Chromium 驗收桌面與 390px 手機版。涵蓋搜尋、報告、圖表繪製、資料來源展開、橫向溢出、錯誤提示及取消搜尋，包含 AAPL、MSFT、TSLA 及 Google 新聞與錯誤狀態檢查。真實模式需要能連線至 `api.nasdaq.com` 及 `news.google.com`。
 
 有 `/usr/bin/chromium` 時直接使用；亦可用 `CHROMIUM_EXECUTABLE` 指定路徑，否則先執行 `npx playwright install chromium`。測試報告及失敗追蹤保存在 `.playwright/`，以 `npx playwright show-report .playwright/report` 查看。雲端執行可設定 `XDG_CONFIG_HOME=/workspace/.config`、`XDG_CACHE_HOME=/workspace/.cache`。
 

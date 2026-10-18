@@ -9,6 +9,8 @@ import { tierColor } from "@/lib/scoring/presentation";
 // 數據來源標籤
 const SOURCE_LABEL: Record<string, string> = {
   nasdaq: "Nasdaq 真實",
+  finnhub: "Finnhub 真實",
+  google_news: "Google News RSS",
   derived: "推導計算",
   mock: "模擬數據",
   proxy: "代理假設",
@@ -16,6 +18,8 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 const SOURCE_COLOR: Record<string, string> = {
   nasdaq: "#22c55e",
+  finnhub: "#22c55e",
+  google_news: "#22c55e",
   derived: "#58a6ff",
   mock: "#f59e0b",
   proxy: "#8b949e",
@@ -44,7 +48,7 @@ const SOURCE_PROVENANCE: Record<string, string> = {
   financials: "lib/futu/nasdaq.ts → fetchFinancials()｜Nasdaq /api/company/{t}/financials",
   valuation: "lib/futu/nasdaq.ts → deriveValuation()｜市值÷財務數字推導",
   ratings: "尚未接入真實評級資料",
-  news: "尚未接入真實新聞資料",
+  news: "Google News RSS｜最近七日代號搜尋，顯示出版來源、發布時間及 Google 原文跳轉連結；未取得時標示未知",
   marketTrendUp: "lib/futu/nasdaq.ts → fetchEtfDaily(SPY)｜Nasdaq /api/quote/SPY/historical",
   sectorStrong: "lib/futu/nasdaq.ts → fetchEtfDaily(sector ETF)｜Nasdaq /api/quote/{ETF}/historical",
   indicators: "lib/indicators/indicators.ts｜由 candlesDaily 本地計算（EMA/RSI/MACD/KD/布林/ATR/20日成交量加權均價）",
@@ -255,11 +259,13 @@ function ReportView({ symbol }: { symbol: string }) {
       {/* 9 買入理由（圖+新聞） */}
       <Block n={9} title="買入理由區（圖 + 新聞）" fable>
         <div className="mb-3"><Chart candles={r.candlesDaily} buyPoints={r.buyPoints} height={300} /></div>
-        {r.news.length === 0 && <p className="text-sm text-muted">未取得真實新聞。</p>}
+        {r.newsMessage && <p className="text-sm text-muted mb-2">{r.newsMessage}</p>}
+        {r.newsFetchedAt && <p className="text-xs text-muted mb-2">新聞讀取時間：{new Date(r.newsFetchedAt * 1000).toLocaleString()}</p>}
+        {r.news.length === 0 && !r.newsMessage && <p className="text-sm text-muted">未取得真實新聞。</p>}
         <ul className="text-sm space-y-2">
           {r.news.slice(0, 3).map((n, i) => (
             <li key={i} className="border-b border-line pb-2 last:border-0">
-              <a href={n.url} className="font-medium">{n.title}</a>
+              <a href={n.url} target="_blank" rel="noopener noreferrer" className="font-medium break-words">{n.title}</a>
               <div className="text-muted text-xs">{n.source} · {new Date(n.time * 1000).toLocaleString()}</div>
               <div className="text-muted mt-0.5">{n.summary}</div>
             </li>

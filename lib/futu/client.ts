@@ -5,6 +5,10 @@ import { score } from "../scoring/scoring";
 import { buildMemo, buildPlan, buildRules, audit, findBuyPoints } from "../fable/fable";
 import * as mock from "./mock";
 import * as nasdaq from "./nasdaq";
+import { fetchGoogleNews } from "../news/google";
+import type { NewsProvider, NewsResult } from "../news/types";
+import { searchDirectory } from "./directory";
+import { normalizeSearchQuery } from "./symbol";
 
 export class ReportError extends Error {
   constructor(public code: "INVALID_SYMBOL" | "INVALID_RANGE" | "SYMBOL_NOT_FOUND" | "DATA_UNAVAILABLE", message: string) {
@@ -26,6 +30,8 @@ export function hasFutuCreds(): boolean {
 export interface ReportOptions {
   realData?: boolean;
   provider?: typeof nasdaq;
+  newsProvider?: NewsProvider;
+  directorySearch?: typeof searchDirectory;
 }
 
 // 所有股票資料入口共用模式、代號與存在性驗證。
@@ -52,14 +58,16 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   let valuation: Valuation | null;
   let ratings: Ratings | null;
   let news: NewsItem[];
+  let newsResult: NewsResult | undefined;
   let marketTrendUp: boolean | null = null;
   let sectorStrong: boolean | null = null;
 
   if (real) {
     quote = verifiedQuote;
-    const [candles, summary, finRaw, spyTrend] = await Promise.all([
+    const [candles, summary, finRaw, spyTrend, fetchedNews] = await Promise.all([
       provider.fetchDaily(symbol), provider.fetchSummary(symbol),
       provider.fetchFinancials(symbol), provider.fetchSpyTrend(),
+      (options.newsProvider ?? fetchGoogleNews)(symbol),
     ]);
     if (!candles || candles.length < 200) {
       throw new ReportError("DATA_UNAVAILABLE", "有效日線不足 200 根，暫時無法產生報告");
@@ -68,13 +76,15 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
     financials = finRaw?.fin ?? null;
     valuation = summary && finRaw ? provider.deriveValuation(summary.marketCap, finRaw) : null;
     ratings = null;
-    news = [];
+    newsResult = fetchedNews;
+    news = newsResult.data;
     marketTrendUp = spyTrend;
     sectorStrong = summary ? await provider.fetchSectorStrength(summary.sector) : null;
     sources.quote = sources.candlesDaily = "nasdaq";
     sources.financials = financials ? "nasdaq" : "unknown";
     sources.valuation = valuation ? "derived" : "unknown";
-    sources.ratings = sources.news = "unknown";
+    sources.ratings = "unknown";
+    sources.news = newsResult.source;
     sources.marketTrendUp = marketTrendUp === null ? "unknown" : "nasdaq";
     sources.sectorStrong = sectorStrong === null ? "unknown" : "nasdaq";
   } else {
@@ -103,18 +113,16 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   return {
     quote, mode: real ? "real" : "demo", score: scoreResult,
     memo, rules: buildRules(memo), plan, audit: audit(scoreResult, memo, plan),
-    buyPoints: findBuyPoints(daily), news, candlesDaily: daily, candlesIntraday: intraday, sources,
+    buyPoints: findBuyPoints(daily), news, newsStatus: newsResult?.status, newsMessage: newsResult?.message, newsFetchedAt: newsResult?.fetchedAt,
+    candlesDaily: daily, candlesIntraday: intraday, sources,
   };
 }
 
 export async function searchSymbols(q: string, options: ReportOptions = {}) {
   const real = options.realData ?? process.env.REAL_DATA !== "false";
+  try { normalizeSearchQuery(q); }
+  catch { throw new ReportError("INVALID_SYMBOL", "搜尋內容無效，請輸入股票代號或公司名稱（最多 100 字）"); }
   if (!real) return mock.mockSearch(q.trim());
-  try {
-    const { symbol, quote } = await getDataContext(q, options);
-    return [{ symbol, name: quote.name, type: "STOCK" }];
-  } catch (error) {
-    if (error instanceof ReportError && error.code === "SYMBOL_NOT_FOUND") return [];
-    throw error;
-  }
+  try { return await (options.directorySearch ?? searchDirectory)(q); }
+  catch { throw new ReportError("DATA_UNAVAILABLE", "股票搜尋服務暫時不可用，請稍後再試"); }
 }

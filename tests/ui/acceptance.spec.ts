@@ -1,5 +1,26 @@
 import { test, expect, type Page } from "@playwright/test";
 
+test("Google news displays its publisher, time, source badge and safe external link", async ({ page, request }) => {
+  const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
+  expect(response.ok()).toBe(true);
+  const report = await response.json();
+  report.mode = "real";
+  report.sources.news = "google_news";
+  report.newsStatus = "ready";
+  report.newsMessage = "Google News 最近七日搜尋結果；連結經 Google 跳轉至原文。";
+  report.news = [{ title: "Google acceptance headline", source: "Test Publisher", time: 1792324800, url: "https://example.com/news", summary: "" }];
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  const link = page.getByRole("link", { name: "Google acceptance headline" });
+  await expect(link).toHaveAttribute("href", "https://example.com/news");
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(page.getByText("新聞·Google News RSS", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Test Publisher ·/)).toBeVisible();
+  await expect(page.getByText(report.newsMessage, { exact: true })).toBeVisible();
+  await noOverflow(page);
+});
+
 async function reportReady(page: Page) {
   await expect(page.getByRole("heading", { name: /報價頭/ })).toBeVisible();
   await expect(page.locator("section")).toHaveCount(11);
@@ -9,15 +30,85 @@ async function noOverflow(page: Page) {
   expect(size.content).toBeLessThanOrEqual(size.width + 1);
 }
 
-for (const input of ["AAPL", " us.aapl "]) {
+for (const status of ["empty", "unavailable"] as const) {
+  test(`news ${status} is clearly labelled without hiding the stock report`, async ({ page, request }) => {
+    const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
+    const report = await response.json();
+    report.mode = "real";
+    report.news = [];
+    report.newsStatus = status;
+    report.sources.news = status === "empty" ? "google_news" : "unknown";
+    report.newsMessage = status === "empty" ? "Google News 最近七日沒有可顯示的相關新聞。" : "Google 新聞讀取失敗或格式無效，請稍後再試";
+    await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+    await page.goto("/stock/AAPL");
+    await reportReady(page);
+    await expect(page.getByText(report.newsMessage, { exact: true })).toBeVisible();
+    await expect(page.getByText(status === "empty" ? "新聞·Google News RSS" : "新聞·未知 / 未取得", { exact: true })).toBeVisible();
+    await noOverflow(page);
+  });
+}
+
+for (const input of ["AAPL", " us.aapl ", "MSFT", "TSLA"]) {
   test(`keyboard search normalizes ${JSON.stringify(input)} and opens a working report`, async ({ page }) => {
     await page.goto("/");
     await page.getByRole("combobox").fill(input);
     await page.getByRole("combobox").press("Enter");
-    await expect(page).toHaveURL(/\/stock\/AAPL$/);
+    await expect(page).toHaveURL(new RegExp(`/stock/${input.trim().toUpperCase().replace(/^US\./, "")}$`));
     await reportReady(page);
   });
 }
+
+test("company name search fetches no report until a result is selected", async ({ page }) => {
+  let reports = 0;
+  page.on("request", request => { if (request.url().includes("/api/report?")) reports++; });
+  await page.goto("/");
+  await page.getByRole("combobox").fill("Microsoft");
+  const result = page.getByRole("button", { name: /US\.MSFT/ });
+  await expect(result).toBeVisible();
+  expect(reports).toBe(0);
+  await result.click();
+  await expect(page).toHaveURL(/\/stock\/MSFT$/);
+  await reportReady(page);
+  expect(reports).toBeGreaterThan(0);
+});
+
+test("no matching company is distinct from a search service failure", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("combobox").fill("NoSuchCorporationXyz");
+  await expect(page.getByText(/找不到符合範圍的股票/)).toBeVisible();
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("search failure is actionable and cannot navigate to a fabricated stock", async ({ page }) => {
+  await page.route("**/api/search?**", route => route.fulfill({ status: 503, json: { error: "股票搜尋服務暫時不可用，請稍後再試", code: "DATA_UNAVAILABLE" } }));
+  await page.goto("/");
+  await page.getByRole("combobox").fill("Microsoft");
+  await page.getByRole("combobox").press("Enter");
+  await expect(page.getByText("股票搜尋服務暫時不可用，請稍後再試", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("clearing a submitted search prevents late navigation", async ({ page }) => {
+  let release!: () => void;
+  let delivered!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const complete = new Promise<void>(resolve => { delivered = resolve; });
+  await page.route("**/api/search?**", async route => {
+    await pending;
+    try { await route.fulfill({ json: { mode: "real", source: "nasdaq", data: [{ symbol: "US.MSFT", name: "Microsoft", type: "STOCK" }] } }); }
+    finally { delivered(); }
+  });
+  await page.goto("/");
+  await page.getByRole("combobox").fill("Microsoft");
+  const request = page.waitForRequest("**/api/search?**");
+  await page.getByRole("combobox").press("Enter");
+  await request;
+  await page.getByRole("combobox").fill("");
+  release(); await complete;
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/$/);
+});
 
 test("search suggestion opens report, both charts paint candles, and layouts stay within the viewport", async ({ page }, info) => {
   const errors: string[] = [];
@@ -27,7 +118,7 @@ test("search suggestion opens report, both charts paint candles, and layouts sta
   await page.getByRole("button", { name: /US\.AAPL/ }).click();
   await reportReady(page);
   if (info.project.name.startsWith("demo")) await expect(page.getByText(/示範模式：報價/)).toBeVisible();
-  else await expect(page.getByText("新聞·未知 / 未取得", { exact: true })).toBeVisible();
+  else await expect(page.getByText(/新聞·(?:Google News RSS|未知 \/ 未取得)/)).toBeVisible();
   for (const title of [/買入理由區/, /^10\.\s*日線圖/]) {
     const chart = page.locator("section").filter({ has: page.getByRole("heading", { name: title }) });
     await expect(chart.locator("canvas").first()).toBeVisible();
@@ -58,7 +149,7 @@ test("invalid input gives an immediate message without navigating", async ({ pag
   await page.goto("/");
   await page.getByRole("combobox").fill("BAD_SYMBOL");
   await page.getByRole("combobox").press("Enter");
-  await expect(page.getByRole("alert").filter({ hasText: "請輸入有效股票代號或選擇搜尋結果" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "搜尋內容無效，請輸入股票代號或公司名稱（最多 100 字）" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
 

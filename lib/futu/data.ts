@@ -3,6 +3,7 @@ import { getDataContext, searchSymbols, ReportError, type ReportOptions } from "
 import { validateCandles } from "../indicators/indicators";
 import { aggregateCandles } from "./candles";
 import * as mock from "./mock";
+import { fetchGoogleNews } from "../news/google";
 
 export type DataKind = "quote" | "candles" | "financials" | "valuation" | "ratings" | "news";
 type StockData = Quote | Candle[] | Financials | Valuation | Ratings | NewsItem[];
@@ -17,7 +18,11 @@ export async function getStockData(kind: DataKind, symbol: string, rawRange = "d
   const response: DataResponse<StockData> = { symbol: context.symbol, mode, source: "unknown", data: null };
   if (kind === "quote") return { ...response, source: real ? "nasdaq" : "mock", data: context.quote };
   if (kind === "ratings") return { ...response, source: real ? "unknown" : "mock", data: real ? null : mock.mockRatings(context.symbol) };
-  if (kind === "news") return { ...response, source: real ? "unknown" : "mock", data: real ? [] : mock.mockNews(context.symbol) };
+  if (kind === "news") {
+    if (!real) return { ...response, source: "mock", data: mock.mockNews(context.symbol) };
+    const news = await (options.newsProvider ?? fetchGoogleNews)(context.symbol);
+    return { ...response, ...news };
+  }
   if (kind === "financials") {
     const data = real ? (await provider.fetchFinancials(context.symbol))?.fin ?? null : mock.mockFinancials(context.symbol);
     return { ...response, source: data ? real ? "nasdaq" : "mock" : "unknown", data };
@@ -41,5 +46,6 @@ export async function getStockData(kind: DataKind, symbol: string, rawRange = "d
 export async function getSearchData(query: string, options: ReportOptions = {}): Promise<DataResponse<SearchResult[]>> {
   const mode = (options.realData ?? process.env.REAL_DATA !== "false") ? "real" : "demo";
   const data = await searchSymbols(query, options);
-  return { query: query.trim(), mode, source: mode === "real" ? "nasdaq" : "mock", data };
+  return { query: query.trim(), mode, source: mode === "real" ? "nasdaq" : "mock", data,
+    message: data.length ? "請選擇股票查看報告；搜尋依 Nasdaq 名單及證券名稱篩選，分類可能有遺漏。" : "找不到符合範圍的股票，請嘗試其他代號或英文公司名稱。" };
 }

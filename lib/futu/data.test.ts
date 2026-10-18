@@ -10,6 +10,7 @@ import * as nasdaq from "./nasdaq";
 import * as mock from "./mock";
 
 const kinds: DataKind[] = ["quote", "candles", "financials", "valuation", "ratings", "news"];
+const unavailableNews = async () => ({ data: [], source: "unknown" as const, status: "unavailable" as const, message: "新聞讀取失敗" });
 const provider = {
   ...nasdaq,
   fetchVerifiedQuote: async () => ({ ...mock.mockQuote("US.AAPL"), symbol: "AAPL" }),
@@ -68,7 +69,7 @@ test("aggregation handles leap days and rejects unsorted candles", () => {
 test("every data API validates symbols before contacting the provider", async () => {
   let calls = 0;
   const noCalls = { ...provider, fetchVerifiedQuote: async () => { calls++; throw new Error("must not contact provider"); } };
-  for (const kind of kinds) await assert.rejects(getStockData(kind, "BAD_SYMBOL", "day", { realData: true, provider: noCalls }),
+  for (const kind of kinds) await assert.rejects(getStockData(kind, "BAD_SYMBOL", "day", { newsProvider: unavailableNews, realData: true, provider: noCalls }),
     (e: unknown) => e instanceof ReportError && e.status === 400);
   assert.equal(calls, 0);
 });
@@ -96,7 +97,7 @@ test("demo mode honours REAL_DATA=false for all data routes and does not fetch r
 
 test("real optional fields stay unknown instead of fabricated data", async () => {
   for (const kind of ["financials", "valuation", "ratings", "news"] as const) {
-    const result = await getStockData(kind, "AAPL", "day", { realData: true, provider });
+    const result = await getStockData(kind, "AAPL", "day", { newsProvider: unavailableNews, realData: true, provider });
     assert.equal(result.mode, "real");
     assert.equal(result.source, "unknown");
     assert.deepEqual(result.data, kind === "news" ? [] : null);
@@ -104,7 +105,7 @@ test("real optional fields stay unknown instead of fabricated data", async () =>
 });
 
 test("real intraday is explicitly unavailable; demo intraday is explicitly mock", async () => {
-  const real = await getStockData("candles", "AAPL", "1D", { realData: true, provider });
+  const real = await getStockData("candles", "AAPL", "1D", { newsProvider: unavailableNews, realData: true, provider });
   assert.equal(real.source, "unknown");
   assert.deepEqual(real.data, []);
   const demo = await getStockData("candles", "AAPL", "1D", { realData: false });
@@ -114,7 +115,7 @@ test("real intraday is explicitly unavailable; demo intraday is explicitly mock"
 
 test("weekly/monthly routes actually aggregate and identify underlying sources", async () => {
   for (const range of ["week", "month"] as const) {
-    const result = await getStockData("candles", "AAPL", range, { realData: true, provider: { ...provider, fetchDaily: async () => daily } });
+    const result = await getStockData("candles", "AAPL", range, { newsProvider: unavailableNews, realData: true, provider: { ...provider, fetchDaily: async () => daily } });
     assert.equal(result.range, range);
     assert.equal(result.source, "derived");
     assert.equal(result.inputSource, "nasdaq");
@@ -126,10 +127,10 @@ test("weekly/monthly routes actually aggregate and identify underlying sources",
 });
 
 test("invalid ranges and unavailable daily data cannot silently return daily or mock prices", async () => {
-  await assert.rejects(getStockData("candles", "AAPL", "year", { realData: true, provider }),
+  await assert.rejects(getStockData("candles", "AAPL", "year", { newsProvider: unavailableNews, realData: true, provider }),
     (e: unknown) => e instanceof ReportError && e.code === "INVALID_RANGE");
   for (const data of [null, [], [...daily].reverse()]) {
-    await assert.rejects(getStockData("candles", "AAPL", "day", { realData: true, provider: { ...provider, fetchDaily: async () => data } }),
+    await assert.rejects(getStockData("candles", "AAPL", "day", { newsProvider: unavailableNews, realData: true, provider: { ...provider, fetchDaily: async () => data } }),
       (e: unknown) => e instanceof ReportError && e.status === 503);
   }
 });
@@ -145,12 +146,11 @@ test("every real data route returns 404 for missing symbols and 503 for provider
 });
 
 test("search differentiates verified zero results from upstream failure", async () => {
-  const missing = { ...provider, fetchVerifiedQuote: async () => { throw new nasdaq.QuoteLookupError("SYMBOL_NOT_FOUND"); } };
-  const response = await getSearchData("ZZZZZZ", { realData: true, provider: missing });
+  const response = await getSearchData("ZZZZZZ", { realData: true, directorySearch: async () => [] });
   assert.deepEqual(response.data, []);
   assert.equal(response.source, "nasdaq");
-  const failed = { ...provider, fetchVerifiedQuote: async () => { throw new nasdaq.QuoteLookupError("DATA_UNAVAILABLE"); } };
-  await assert.rejects(getSearchData("AAPL", { realData: true, provider: failed }), (e: unknown) => e instanceof ReportError && e.status === 503);
+  assert.match(response.message!, /找不到/);
+  await assert.rejects(getSearchData("Apple", { realData: true, directorySearch: async () => { throw new Error("upstream"); } }), (e: unknown) => e instanceof ReportError && e.status === 503);
 });
 
 test("missing/blank query parameters return 400 on all routes", async () => {

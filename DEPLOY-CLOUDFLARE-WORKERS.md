@@ -94,7 +94,7 @@ npm run cf:preview
 |---|---|---|
 | `REAL_DATA` | wrangler.jsonc [vars] | true=真实 Nasdaq / false=mock（Free 建议 false） |
 | `FUTU_API_BASE` | wrangler.jsonc [vars] | 富途 endpoint（Workers 上不可用，预留） |
-| `NEWS_PROVIDER` | wrangler.jsonc [vars] | 新闻来源（finnhub） |
+| `NEWS_PROVIDER` | wrangler.jsonc [vars] | 新闻来源标记（google_news，免费免 key） |
 | `NEWS_API_KEY` | `npx wrangler secret put` | Finnhub key（接真实新闻时） |
 
 **注意**：Workers 不读 `.env` 文件，环境变量要在 `wrangler.jsonc` 的 `[vars]` 或 `wrangler secret put` 里配置。
