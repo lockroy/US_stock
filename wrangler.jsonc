@@ -24,6 +24,7 @@
   },
   "vars": {
     "REAL_DATA": "true",
+    "NEWS_ENABLED": "false",
     "FUTU_API_BASE": "https://openapi.futunn.com",
     "NEWS_PROVIDER": "google_news"
   }

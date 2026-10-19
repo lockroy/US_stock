@@ -28,7 +28,7 @@ export function buildMemo(ind: IndicatorSnapshot, candles: Candle[]): ResearchMe
   const swing = recentSwing(candles);
   const trend =
     ind.ema20 > ind.ema50 && ind.ema50 > ind.ema200
-      ? "上升趨勢：均線多頭排列，更高低點結構"
+      ? "上升趨勢：均線多頭排列"
       : ind.ema20 < ind.ema50 && ind.ema50 < ind.ema200
       ? "下降趨勢：均線空頭排列"
       : "盤整：均線糾結，方向未明";
@@ -89,7 +89,7 @@ export function buildRules(memo: ResearchMemo): TradeRule[] {
       entry: "至少200根日線；收盤突破前5根高點；成交量達前20根均量1.5倍；EMA20 > EMA50 > EMA200；收盤高於EMA20及20日成交量加權均價",
       exit: "收在支撐下方或出現反向訊號",
       stop: memo.invalidation,
-      size: "每筆風險 1%（ATR 倍數控倉）",
+      size: "研究用風險參數示例：每筆 1%；未按個人資金計算實際倉位",
       timeframe: "日線收盤確認；需待下一交易時段評估執行",
     },
   ];
@@ -98,7 +98,8 @@ export function buildRules(memo: ResearchMemo): TradeRule[] {
 // ---- 交易計畫（支撐壓力 ± ATR） ----
 export function buildPlan(ind: IndicatorSnapshot, candles: Candle[]): TradePlan {
   const swing = recentSwing(candles);
-  const atr = ind.atr || ind.lastClose * 0.02;
+  const atr = ind.atr;
+  if (!Number.isFinite(atr) || atr < 0) throw new Error("ATR 不可用，不產生交易參考價");
   return {
     buyZone: `${swing.low.toFixed(2)} ~ ${swing.high.toFixed(2)}`,
     entry: ind.lastClose,

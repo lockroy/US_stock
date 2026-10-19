@@ -5,7 +5,7 @@ import { score } from "../scoring/scoring";
 import { buildMemo, buildPlan, buildRules, audit, findBuyPoints } from "../fable/fable";
 import * as mock from "./mock";
 import * as nasdaq from "./nasdaq";
-import { fetchGoogleNews } from "../news/google";
+import { getNews } from "../news/provider";
 import type { NewsProvider, NewsResult } from "../news/types";
 import { searchDirectory } from "./directory";
 import { normalizeSearchQuery } from "./symbol";
@@ -67,7 +67,7 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
     const [candles, summary, finRaw, spyTrend, fetchedNews] = await Promise.all([
       provider.fetchDaily(symbol), provider.fetchSummary(symbol),
       provider.fetchFinancials(symbol), provider.fetchSpyTrend(),
-      (options.newsProvider ?? fetchGoogleNews)(symbol),
+      getNews(symbol, options.newsProvider),
     ]);
     if (!candles || candles.length < 200) {
       throw new ReportError("DATA_UNAVAILABLE", "有效日線不足 200 根，暫時無法產生報告");

@@ -13,7 +13,7 @@ export interface NewsDiagnostic {
 export interface NewsResult {
   data: NewsItem[];
   source: DataSource;
-  status: "ready" | "empty" | "not_configured" | "unauthorized" | "rate_limited" | "unavailable";
+  status: "ready" | "empty" | "not_configured" | "unauthorized" | "rate_limited" | "unavailable" | "disabled";
   message: string;
   fetchedAt?: number;
   diagnosticId?: string;

@@ -9,7 +9,7 @@ import { tierColor } from "@/lib/scoring/presentation";
 
 // 數據來源標籤
 const SOURCE_LABEL: Record<string, string> = {
-  nasdaq: "Nasdaq 真實",
+  nasdaq: "Nasdaq 資料",
   finnhub: "Finnhub 真實",
   google_news: "Google News RSS",
   derived: "推導計算",
@@ -102,7 +102,7 @@ function ReportView({ symbol }: { symbol: string }) {
   const r = data;
   const newsTicker = normalizeTicker(r.quote.symbol);
   const googleNewsUrl = newsTicker ? `https://news.google.com/search?${new URLSearchParams({ q: `${newsTicker} stock when:7d`, hl: "en-US", gl: "US", ceid: "US:en" })}` : undefined;
-  const up = r.quote.change >= 0;
+  const up = r.quote.change !== null && r.quote.change >= 0;
   const color = tierColor(r.score.tier);
 
   return (
@@ -116,13 +116,13 @@ function ReportView({ symbol }: { symbol: string }) {
             <div className="text-muted text-sm">{r.quote.name}</div>
           </div>
           <div className="text-3xl font-bold">${r.quote.lastPrice.toFixed(2)}</div>
-          <div className={up ? "text-ok" : "text-bad"}>
-            {up ? "+" : ""}
-            {r.quote.change.toFixed(2)} ({up ? "+" : ""}
-            {r.quote.changePct.toFixed(2)}%)
+          <div className={r.quote.change === null ? "text-muted" : up ? "text-ok" : "text-bad"}>
+            {r.quote.change === null ? "漲跌未知" : `${up ? "+" : ""}${r.quote.change.toFixed(2)}`} ({r.quote.changePct === null ? "百分比未知" : `${r.quote.changePct >= 0 ? "+" : ""}${r.quote.changePct.toFixed(2)}%`})
           </div>
-          <div className="text-muted text-sm ml-auto">成交量 {r.quote.volume.toLocaleString()}</div>
+          <div className="text-muted text-sm ml-auto">成交量 {r.quote.volume === null ? "未知" : r.quote.volume.toLocaleString()}</div>
         </div>
+        <p className="text-xs text-muted mt-2">供應商報價時間：{r.quote.asOf ?? "未知"}；即時／延遲狀態：{r.quote.isRealTime === true ? "供應商標示即時" : r.quote.isRealTime === false ? "供應商標示非即時" : "未知"}</p>
+        {r.quote.fetchedAt && <p className="text-xs text-muted mt-1">資料讀取時間：{new Date(r.quote.fetchedAt * 1000).toLocaleString()}（不是成交時間）</p>}
         {/* 數據來源標註（透明化：每項數據實際從哪裡來） */}
         {r.sources && (
           <div className="mt-3 space-y-1.5">
@@ -244,6 +244,7 @@ function ReportView({ symbol }: { symbol: string }) {
 
       {/* 6 交易計畫 */}
       <Block n={6} title="交易 / 投資計畫">
+        <p className="text-xs text-muted mb-2">以下為近期高低價及實際 ATR 推導的模型參考價，並非分析師目標價；未經費用及樣本外回測驗證。</p>
         <div className="flex flex-wrap gap-4 text-sm">
           <div><span className="text-muted">買入區間：</span>{r.plan.buyZone}</div>
           <div><span className="text-muted">入場參考：</span>${r.plan.entry}</div>
@@ -272,6 +273,7 @@ function ReportView({ symbol }: { symbol: string }) {
 
       {/* 8 佈局策略 */}
       <Block n={8} title="短 / 中 / 長期佈局">
+        <p className="text-xs text-warn mb-2">以下為一般研究框架，未按本股票驗證，亦未取得真實 60 分鐘行情；並非已成立的交易訊號。</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
           <div className="card p-3"><div className="text-accent font-semibold mb-1">短期 1–4 週</div>日/60m 順勢，依買點與失效條件操作。</div>
           <div className="card p-3"><div className="text-accent font-semibold mb-1">中期 1–6 月</div>週 K 多頭排列時分批建立，目標價止盈。</div>
@@ -280,7 +282,7 @@ function ReportView({ symbol }: { symbol: string }) {
       </Block>
 
       {/* 9 買入理由（圖+新聞） */}
-      <Block n={9} title="買入理由區（圖 + 新聞）" fable>
+      <Block n={9} title={r.newsStatus === "disabled" ? "買入理由區（價格圖；新聞暫停）" : "買入理由區（圖 + 新聞）"} fable>
         <div className="mb-3"><Chart candles={r.candlesDaily} buyPoints={r.buyPoints} height={300} /></div>
         {r.newsMessage && <p className="text-sm text-muted mb-2">{r.newsMessage}</p>}
         {r.mode === "real" && r.news.length === 0 && (r.newsStatus === "unavailable" || r.newsStatus === "rate_limited") && googleNewsUrl && (

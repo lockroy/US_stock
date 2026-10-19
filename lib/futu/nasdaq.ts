@@ -1,8 +1,9 @@
 // 真實數據源：Nasdaq 公開 API（免 key、免帳號）
 // 覆蓋：即時報價、歷史日線（OHLCV）、年度財務四表、市值/產業、ETF 大盤與產業趨勢。
-// 不提供：分析師評級、個股新聞、日內分時（由上層標註並兜底）。
-// 注意：此為非官方公開端點，已對每個請求加逾時與失敗回 null（上層 fallback）。
+// 不提供：分析師評級、個股新聞、日內分時（由上層標註未知）。
+// 注意：此為非官方公開端點，已對每個請求加逾時與失敗回 null（上層保持未知）。
 import type { Candle, Quote, Financials, Valuation } from "../types";
+import { validateCandles } from "../indicators/indicators";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -13,15 +14,30 @@ export function toTicker(symbol: string): string {
   return s.startsWith("US.") ? s.slice(3) : s;
 }
 
-function parseMoney(s: string | undefined | null): number {
-  if (!s) return 0;
-  return parseFloat(String(s).replace(/[$,%]/g, "").replace(/,/g, "")) || 0;
+function parseDateUS(value: unknown): number | null {
+  if (typeof value !== "string" || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(value)) return null;
+  const [m, d, y] = value.split("/").map(Number);
+  const time = Date.UTC(y, m - 1, d);
+  const date = new Date(time);
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d ? time / 1000 : null;
 }
 
-function parseDateUS(s: string): number {
-  // "08/28/2026" -> unix seconds (UTC)
-  const [m, d, y] = s.split("/").map(Number);
-  return Math.floor(Date.UTC(y, m - 1, d) / 1000);
+// 股票與 ETF 共用嚴格 OHLCV 解析，缺成交量不當作零，也不丟掉壞列後假裝完整。
+export function parseHistoricalRows(rows: unknown): Candle[] | null {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const candles: Candle[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") return null;
+    const r = row as Record<string, unknown>;
+    const time = parseDateUS(r.date);
+    const open = parseFinancialNumber(r.open), high = parseFinancialNumber(r.high);
+    const low = parseFinancialNumber(r.low), close = parseFinancialNumber(r.close), volume = parseFinancialNumber(r.volume);
+    if (time === null || open === null || high === null || low === null || close === null || volume === null) return null;
+    candles.push({ time, open, high, low, close, volume });
+  }
+  candles.sort((a, b) => a.time - b.time);
+  try { validateCandles(candles); } catch { return null; }
+  return candles;
 }
 
 // 財務使用嚴格解析：空白、N/A、缺欄位或非數字都保留未知。
@@ -65,16 +81,20 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
     const d = body.data;
     if (toTicker(d.symbol ?? "") !== ticker) throw new QuoteLookupError("DATA_UNAVAILABLE");
     const p = d.primaryData || {};
-    const last = parseMoney(p.lastSalePrice);
-    if (!Number.isFinite(last) || last <= 0) throw new QuoteLookupError("DATA_UNAVAILABLE");
+    const last = parseFinancialNumber(p.lastSalePrice);
+    const volume = parseFinancialNumber(p.volume);
+    if (last === null || !Number.isFinite(last) || last <= 0) throw new QuoteLookupError("DATA_UNAVAILABLE");
     return {
       symbol: ticker,
       name: d.companyName || ticker,
       lastPrice: last,
-      change: parseMoney(p.netChange?.replace(/^\+/, "")),
-      changePct: parseFloat(String(p.percentageChange || "").replace(/[%+]/g, "")) || 0,
-      volume: parseMoney(p.volume),
-      timestamp: Math.floor(Date.now() / 1000),
+      change: parseFinancialNumber(p.netChange),
+      changePct: parseFinancialNumber(p.percentageChange),
+      volume: volume !== null && volume >= 0 ? volume : null,
+      timestamp: null, // 供應商未提供已核對時區的 epoch，不以讀取時間冒充成交時間。
+      asOf: typeof p.lastTradeTimestamp === "string" && p.lastTradeTimestamp.trim() && p.lastTradeTimestamp !== "N/A" ? p.lastTradeTimestamp : null,
+      fetchedAt: Math.floor(Date.now() / 1000),
+      isRealTime: typeof d.isRealTime === "boolean" ? d.isRealTime : null,
     };
   } catch (error) {
     if (error instanceof QuoteLookupError) throw error;
@@ -88,7 +108,7 @@ export async function fetchQuote(symbol: string): Promise<Quote | null> {
 
 // 摘要資料：市值、產業、52 週區間（估值推導與產業趨勢用）
 export interface NasdaqSummary {
-  marketCap: number; // 美元
+  marketCap: number | null; // 美元
   sector: string | null;
   industry: string | null;
   oneYrTarget: number | null;
@@ -104,10 +124,10 @@ export async function fetchSummary(symbol: string): Promise<NasdaqSummary | null
     const s = (await res.json())?.data?.summaryData;
     if (!s) return null;
     return {
-      marketCap: parseMoney(s.MarketCap?.value),
+      marketCap: parseFinancialNumber(s.MarketCap?.value),
       sector: (s.Sector?.value as string) || null,
       industry: (s.Industry?.value as string) || null,
-      oneYrTarget: parseMoney(s.OneYrTarget?.value) || null,
+      oneYrTarget: parseFinancialNumber(s.OneYrTarget?.value),
     };
   } catch {
     return null;
@@ -131,18 +151,7 @@ export async function fetchDaily(symbol: string, days = 400): Promise<Candle[] |
     const rows = (await res.json())?.data?.tradesTable?.rows;
     if (!Array.isArray(rows) || rows.length === 0) return null;
 
-    const candles: Candle[] = rows
-      .map((r: Record<string, string>) => ({
-        time: parseDateUS(r.date),
-        open: parseMoney(r.open),
-        high: parseMoney(r.high),
-        low: parseMoney(r.low),
-        close: parseMoney(r.close),
-        volume: parseMoney(r.volume),
-      }))
-      .filter((c: Candle) => c.time > 0 && c.close > 0)
-      .sort((a: Candle, b: Candle) => a.time - b.time);
-    return candles.length > 0 ? candles : null;
+    return parseHistoricalRows(rows);
   } catch {
     return null;
   }
@@ -163,18 +172,7 @@ export async function fetchEtfDaily(etf: string, days = 130): Promise<Candle[] |
     if (!res.ok) return null;
     const rows = (await res.json())?.data?.tradesTable?.rows;
     if (!Array.isArray(rows) || rows.length === 0) return null;
-    const candles: Candle[] = rows
-      .map((r: Record<string, string>) => ({
-        time: parseDateUS(r.date),
-        open: parseMoney(r.open),
-        high: parseMoney(r.high),
-        low: parseMoney(r.low),
-        close: parseMoney(r.close),
-        volume: parseMoney(r.volume),
-      }))
-      .filter((c: Candle) => c.time > 0 && c.close > 0)
-      .sort((a: Candle, b: Candle) => a.time - b.time);
-    return candles.length > 0 ? candles : null;
+    return parseHistoricalRows(rows);
   } catch {
     return null;
   }
@@ -273,8 +271,8 @@ export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsR
 }
 
 // 估值只使用已知、有限且適用的輸入，不把缺債務／現金視為零。
-export function deriveValuation(marketCap: number, raw: NasdaqFinancialsRaw | null): Valuation | null {
-  if (!raw || !Number.isFinite(marketCap) || marketCap <= 0) return null;
+export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsRaw | null): Valuation | null {
+  if (!raw || !known(marketCap) || marketCap <= 0) return null;
   const { revenue, netIncome, totalEquity, totalDebt, cash, fin } = raw;
   const pe = known(netIncome) && netIncome > 0 ? marketCap / (netIncome * 1000) : null;
   const peg = pe !== null && known(fin.epsGrowth) && fin.epsGrowth > 0 ? pe / fin.epsGrowth : null;
@@ -324,6 +322,7 @@ export async function fetchSectorStrength(sector: string | null): Promise<boolea
     fetchEtfDaily("SPY", 60),
   ]);
   if (!sectorCandles || !spyCandles || sectorCandles.length < 21 || spyCandles.length < 21) return null;
+  if (!sectorCandles.slice(-21).every((c, i) => c.time === spyCandles.slice(-21)[i].time)) return null;
   const ret20 = (c: Candle[]) => {
     const closes = c.map((x) => x.close);
     return closes[closes.length - 1] / closes[closes.length - 21] - 1;
@@ -331,7 +330,7 @@ export async function fetchSectorStrength(sector: string | null): Promise<boolea
   return ret20(sectorCandles) > ret20(spyCandles);
 }
 
-// 日內/分時：Nasdaq 免費接口無穩定分時，回傳 null 讓 caller 用日線降級
+// 日內/分時：Nasdaq 免費接口無穩定分時，回傳 null，由上層標示未取得
 export async function fetchIntraday(): Promise<Candle[] | null> {
   return null;
 }

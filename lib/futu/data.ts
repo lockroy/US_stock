@@ -3,7 +3,7 @@ import { getDataContext, searchSymbols, ReportError, type ReportOptions } from "
 import { validateCandles } from "../indicators/indicators";
 import { aggregateCandles } from "./candles";
 import * as mock from "./mock";
-import { fetchGoogleNews } from "../news/google";
+import { getNews } from "../news/provider";
 
 export type DataKind = "quote" | "candles" | "financials" | "valuation" | "ratings" | "news";
 type StockData = Quote | Candle[] | Financials | Valuation | Ratings | NewsItem[];
@@ -20,7 +20,7 @@ export async function getStockData(kind: DataKind, symbol: string, rawRange = "d
   if (kind === "ratings") return { ...response, source: real ? "unknown" : "mock", data: real ? null : mock.mockRatings(context.symbol) };
   if (kind === "news") {
     if (!real) return { ...response, source: "mock", data: mock.mockNews(context.symbol) };
-    const news = await (options.newsProvider ?? fetchGoogleNews)(context.symbol);
+    const news = await getNews(context.symbol, options.newsProvider);
     return { ...response, ...news };
   }
   if (kind === "financials") {

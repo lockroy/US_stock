@@ -1,5 +1,37 @@
 import { test, expect, type Page } from "@playwright/test";
 
+test("unknown quote fields cannot look like unchanged prices or zero volume", async ({ page, request }) => {
+  const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
+  const report = await response.json();
+  report.mode = "real";
+  Object.assign(report.quote, { change: null, changePct: null, volume: null, timestamp: null, asOf: null, fetchedAt: 1792368000, isRealTime: null });
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await expect(page.getByText("漲跌未知 (百分比未知)", { exact: true })).toBeVisible();
+  await expect(page.getByText("成交量 未知", { exact: true })).toBeVisible();
+  await expect(page.getByText(/供應商報價時間：未知；即時／延遲狀態：未知/)).toBeVisible();
+  await expect(page.getByText(/不是成交時間/)).toBeVisible();
+  await noOverflow(page);
+});
+
+test("paused news is clearly separate from stock data and model reference prices", async ({ page, request }) => {
+  const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
+  const report = await response.json();
+  report.mode = "real";
+  report.news = [];
+  report.newsStatus = "disabled";
+  report.sources.news = "unknown";
+  report.newsMessage = "新聞功能暫停，未請求外部新聞來源。";
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await reportReady(page);
+  await expect(page.getByText(report.newsMessage, { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "前往 Google News 查看相關新聞" })).toHaveCount(0);
+  await expect(page.getByText(/並非分析師目標價；未經費用及樣本外回測驗證/)).toBeVisible();
+  await expect(page.getByText(/以下為一般研究框架/)).toBeVisible();
+  await noOverflow(page);
+});
+
 test("financial details distinguish missing EPS from net-income growth and preserve real zero", async ({ page, request }) => {
   const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
   const report = await response.json();

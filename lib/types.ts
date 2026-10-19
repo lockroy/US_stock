@@ -15,10 +15,13 @@ export interface Quote {
   symbol: string;
   name: string;
   lastPrice: number;
-  change: number;
-  changePct: number;
-  volume: number;
-  timestamp: number;
+  change: number | null;
+  changePct: number | null;
+  volume: number | null;
+  timestamp: number | null; // 已核對的成交時間；不確定時區時 null
+  asOf?: string | null; // 供應商原始時間文字
+  fetchedAt?: number; // 本次資料讀取時間，不是成交時間
+  isRealTime?: boolean | null;
 }
 
 export interface SearchResult {
