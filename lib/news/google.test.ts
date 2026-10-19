@@ -69,7 +69,7 @@ test("invalid tickers do not request Google", async () => {
   assert.equal((await fetchGoogleNews("../bad", { fetcher: async () => { throw new Error("must not fetch"); } })).status, "unavailable");
 });
 
-test("Workers-compatible fetch does not follow redirects or misreport them as empty news", async () => {
+test("Workers-compatible fetch refuses cross-origin redirects rather than reporting empty news", async () => {
   let calls = 0;
   const result = await fetchGoogleNews("AAPL", { fetcher: async (_input, init) => {
     calls++;
@@ -80,6 +80,45 @@ test("Workers-compatible fetch does not follow redirects or misreport them as em
   assert.equal(result.status, "unavailable");
   assert.equal(result.source, "unknown");
   assert.deepEqual(result.data, []);
+});
+
+test("a normal same-origin RSS redirect is checked manually within the original timeout", async () => {
+  let calls = 0;
+  let firstSignal: AbortSignal | undefined;
+  const result = await fetchGoogleNews("AAPL", { now, fetcher: async (input, init) => {
+    calls++;
+    assert.equal(init?.redirect, "manual");
+    if (calls === 1) {
+      firstSignal = init?.signal ?? undefined;
+      return new Response(null, { status: 302, headers: { Location: "/rss/search?q=AAPL&hl=en-US" } });
+    }
+    assert.equal(init?.signal, firstSignal);
+    assert.equal(new URL(String(input)).pathname, "/rss/search");
+    return new Response(rss(item()));
+  } });
+  assert.equal(calls, 2);
+  assert.equal(result.status, "ready");
+  assert.equal(result.data.length, 1);
+});
+
+test("redirect loops, consent pages, insecure URLs and credentials are not followed", async () => {
+  for (const location of ["/sorry/index", "https://consent.google.com/", "http://news.google.com/rss/search", "https://user@news.google.com/rss/search"]) {
+    let calls = 0;
+    const result = await fetchGoogleNews("AAPL", { fetcher: async () => { calls++; return new Response(null, { status: 302, headers: { Location: location } }); } });
+    assert.equal(calls, 1);
+    assert.equal(result.status, "unavailable");
+    assert.match(result.message, /HTTP 302/);
+  }
+  let calls = 0;
+  const result = await fetchGoogleNews("AAPL", { fetcher: async () => { calls++; return new Response(null, { status: 301, headers: { Location: "/rss/search?q=AAPL" } }); } });
+  assert.equal(calls, 3);
+  assert.equal(result.status, "unavailable");
+});
+
+test("upstream HTTP status is visible without echoing response bodies or headers", async () => {
+  const result = await fetchGoogleNews("AAPL", { fetcher: async () => new Response("private error body", { status: 403 }) });
+  assert.match(result.message, /HTTP 403/);
+  assert.ok(!result.message.includes("private error body"));
 });
 
 test("report and independent endpoint share real news; failure never changes scores or fabricates news", async () => {

@@ -44,13 +44,30 @@ export async function fetchGoogleNews(symbol: string, options: { fetcher?: typeo
   const url = new URL("https://news.google.com/rss/search");
   url.search = new URLSearchParams({ q: `${ticker} stock when:7d`, hl: "en-US", gl: "US", ceid: "US:en" }).toString();
   try {
-    const response = await (options.fetcher ?? fetch)(url, {
+    const signal = AbortSignal.timeout(8000);
+    const request = (target: URL) => (options.fetcher ?? fetch)(target, {
       headers: { Accept: "application/rss+xml, application/xml, text/xml" },
-      // workerd 不支援 redirect:"error"；manual 不跟隨重新導向，3xx 由下方 !ok 拒絕。
-      signal: AbortSignal.timeout(8000), redirect: "manual", next: { revalidate: 300 },
+      // Workers 只支援 follow/manual；逐次核對目標，避免進入驗證頁或其他網站。
+      signal, redirect: "manual", next: { revalidate: 300 },
     });
+    let current = url;
+    let response = await request(current);
+    for (let hops = 0; [301, 302, 303, 307, 308].includes(response.status); hops++) {
+      const location = response.headers.get("location");
+      let target: URL;
+      try { target = new URL(location ?? "", current); }
+      catch { return fail("unavailable", `Google 新聞重新導向無效（HTTP ${response.status}）`); }
+      if (!location || hops >= 2 || target.origin !== url.origin || target.pathname !== url.pathname
+        || target.username || target.password) {
+        await response.body?.cancel();
+        return fail("unavailable", `Google 新聞要求額外重新導向，暫時無法讀取（HTTP ${response.status}）`);
+      }
+      await response.body?.cancel();
+      current = target;
+      response = await request(current);
+    }
     if (response.status === 429) return fail("rate_limited", "Google 新聞暫時限制請求，請稍後再試");
-    if (!response.ok) return fail("unavailable", "Google 新聞暫時無法讀取，請稍後再試");
+    if (!response.ok) return fail("unavailable", `Google 新聞暫時無法讀取（HTTP ${response.status}），請稍後再試`);
     const reader = response.body?.getReader();
     if (!reader) return fail("unavailable", "Google 新聞回應格式無效");
     const chunks: Uint8Array[] = [];
