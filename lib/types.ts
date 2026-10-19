@@ -179,5 +179,7 @@ export interface DataResponse<T> {
   inputSource?: DataSource;
   status?: import("./news/types").NewsResult["status"];
   fetchedAt?: number;
+  diagnosticId?: string;
+  diagnostic?: import("./news/types").NewsDiagnostic;
   message?: string;
 }

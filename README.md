@@ -76,6 +76,12 @@ Google News RSS 為預設新聞來源，免費，毋須 API key。雲端允許 H
 
 Cloudflare Workers 請求使用 `redirect: manual`，只允許同一 HTTPS Google RSS 搜尋端點最多兩次正常重新導向；不同網站、驗證頁、循環或 HTTP 錯誤均保持未知，提示實際 HTTP 狀態。自動讀取失敗時提供 Google News 原頁閱讀入口，不將入口連結當成已取得的新聞。正式環境曾回傳上游 HTTP 503；本地讀取成功不保證 Google 接受 Cloudflare 的請求。
 
+### 新聞失敗日誌
+
+Cloudflare → Workers & Pages → us-stock → Observability／Logs，開啟即時日誌後，在另一個分頁請求 `/api/news?symbol=AAPL`。接口亦回傳有限的 `diagnostic` 分類資訊供直接排查；不需日誌權限即可查看狀態及提示分類。回應的 `diagnosticId` 可對應 `news-google-failure` 結構化日誌。Worker 接口本身可能回傳 HTTP 200；Google 的狀態要看日誌 `upstreamStatus`，不要混淆兩者。
+
+日誌包含 `phase`（fetch、http_response、read_body、parse_rss）、`upstreamStatus`、`contentType` 及 `hint`。錯誤頁只檢查前 8 KiB，分類為 `automated_request_notice`（偵測到自動查詢提示）、`consent_notice`、`server_unavailable_notice` 或 `unclassified`；這些是頁面內容線索，並非單憑狀態碼判斷封鎖。`unclassified` 代表仍未能確認原因。網絡／解析失敗另記錄錯誤名稱，不記錄原始例外訊息。日誌不保留完整錯誤頁、新聞全文、Cookie 或憑證。
+
 ## 第二階段：按需搜尋全美股
 
 全美股指搜尋範圍，不是定時全市場掃描。首次查詢才讀取三個交易所的股票名單，快取一小時，並合併同時發出的請求；搜尋不取得每隻股票的報價、財務或新聞。選擇結果或以 Enter 確認唯一結果後，才開啟該股票報告。輸入有多個匹配時需自行選擇。
