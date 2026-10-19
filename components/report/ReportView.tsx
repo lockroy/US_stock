@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Chart } from "@/components/Chart";
 import type { StockReport, Financials } from "@/lib/types";
+import { normalizeTicker } from "@/lib/futu/symbol";
 
 import { tierColor } from "@/lib/scoring/presentation";
 
@@ -99,6 +100,8 @@ function ReportView({ symbol }: { symbol: string }) {
   if (isError || !data) return <div className="card p-6 text-bad">{error instanceof Error ? error.message : "暫時無法取得報告，請稍後再試。"}</div>;
 
   const r = data;
+  const newsTicker = normalizeTicker(r.quote.symbol);
+  const googleNewsUrl = newsTicker ? `https://news.google.com/search?${new URLSearchParams({ q: `${newsTicker} stock when:7d`, hl: "en-US", gl: "US", ceid: "US:en" })}` : undefined;
   const up = r.quote.change >= 0;
   const color = tierColor(r.score.tier);
 
@@ -280,6 +283,9 @@ function ReportView({ symbol }: { symbol: string }) {
       <Block n={9} title="買入理由區（圖 + 新聞）" fable>
         <div className="mb-3"><Chart candles={r.candlesDaily} buyPoints={r.buyPoints} height={300} /></div>
         {r.newsMessage && <p className="text-sm text-muted mb-2">{r.newsMessage}</p>}
+        {r.mode === "real" && r.news.length === 0 && (r.newsStatus === "unavailable" || r.newsStatus === "rate_limited") && googleNewsUrl && (
+          <a href={googleNewsUrl} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-accent mb-2">前往 Google News 查看相關新聞</a>
+        )}
         {r.newsFetchedAt && <p className="text-xs text-muted mb-2">新聞讀取時間：{new Date(r.newsFetchedAt * 1000).toLocaleString()}</p>}
         {r.news.length === 0 && !r.newsMessage && <p className="text-sm text-muted">未取得真實新聞。</p>}
         <ul className="text-sm space-y-2">

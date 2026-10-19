@@ -60,6 +60,12 @@ for (const status of ["empty", "unavailable"] as const) {
     await reportReady(page);
     await expect(page.getByText(report.newsMessage, { exact: true })).toBeVisible();
     await expect(page.getByText(status === "empty" ? "新聞·Google News RSS" : "新聞·未知 / 未取得", { exact: true })).toBeVisible();
+    const fallback = page.getByRole("link", { name: "前往 Google News 查看相關新聞" });
+    if (status === "unavailable") {
+      await expect(fallback).toHaveAttribute("href", /https:\/\/news\.google\.com\/search\?q=AAPL/);
+      await expect(fallback).toHaveAttribute("target", "_blank");
+      await expect(fallback).toHaveAttribute("rel", "noopener noreferrer");
+    } else await expect(fallback).toHaveCount(0);
     await noOverflow(page);
   });
 }

@@ -74,6 +74,8 @@ Google News RSS 為預設新聞來源，免費，毋須 API key。雲端允許 H
 
 `status: ready|empty` 表示成功讀取（包括確認沒有近期新聞），`source: google_news`；`unavailable|rate_limited` 表示失敗，`source: unknown`，資料為空陣列，並提供 `message`。報告繼續顯示其他資料，失敗不補假新聞。`fetchedAt`／`newsFetchedAt` 為本次讀取時間，RSS 請求快取最多五分鐘；各篇發布時間分開顯示。示範模式維持 mock，不連外。
 
+Cloudflare Workers 請求使用 `redirect: manual`，只允許同一 HTTPS Google RSS 搜尋端點最多兩次正常重新導向；不同網站、驗證頁、循環或 HTTP 錯誤均保持未知，提示實際 HTTP 狀態。自動讀取失敗時提供 Google News 原頁閱讀入口，不將入口連結當成已取得的新聞。正式環境曾回傳上游 HTTP 503；本地讀取成功不保證 Google 接受 Cloudflare 的請求。
+
 ## 第二階段：按需搜尋全美股
 
 全美股指搜尋範圍，不是定時全市場掃描。首次查詢才讀取三個交易所的股票名單，快取一小時，並合併同時發出的請求；搜尋不取得每隻股票的報價、財務或新聞。選擇結果或以 Enter 確認唯一結果後，才開啟該股票報告。輸入有多個匹配時需自行選擇。
