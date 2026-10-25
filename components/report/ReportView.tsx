@@ -2,7 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Chart } from "@/components/Chart";
-import type { StockReport, Financials } from "@/lib/types";
+import { MissingDataSummary } from "./MissingDataSummary";
+import type { StockReport, Financials, StrategyCheck } from "@/lib/types";
 import { normalizeTicker } from "@/lib/futu/symbol";
 
 import { tierColor } from "@/lib/scoring/presentation";
@@ -10,6 +11,7 @@ import { tierColor } from "@/lib/scoring/presentation";
 // 數據來源標籤
 const SOURCE_LABEL: Record<string, string> = {
   nasdaq: "Nasdaq 資料",
+  sec: "SEC 原始申報",
   finnhub: "Finnhub 真實",
   google_news: "Google News RSS",
   derived: "推導計算",
@@ -19,6 +21,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 const SOURCE_COLOR: Record<string, string> = {
   nasdaq: "#22c55e",
+  sec: "#22c55e",
   finnhub: "#22c55e",
   google_news: "#22c55e",
   derived: "#58a6ff",
@@ -31,7 +34,9 @@ const SOURCE_KEY_LABEL: Record<string, string> = {
   candlesDaily: "日線",
   candlesIntraday: "分時",
   financials: "財務",
+  epsGrowth: "EPS",
   valuation: "估值",
+  marketCap: "市值",
   ratings: "評級",
   news: "新聞",
   marketTrendUp: "大盤",
@@ -47,13 +52,15 @@ const SOURCE_PROVENANCE: Record<string, string> = {
   candlesDaily: "lib/futu/nasdaq.ts → fetchDaily()｜Nasdaq /api/quote/{t}/historical",
   candlesIntraday: "尚未接入真實分時資料",
   financials: "lib/futu/nasdaq.ts → fetchFinancials()｜Nasdaq /api/company/{t}/financials",
+  epsGrowth: "SEC Company Facts｜同一申報、同幣種、同年度口徑的攤薄 EPS；不是淨利增長或分析師預期",
   valuation: "lib/futu/nasdaq.ts → deriveValuation()｜市值÷財務數字推導",
+  marketCap: "Nasdaq summary → MarketCap；按需讀取、不快取；供應商更新時間及頻率未知",
   ratings: "尚未接入真實評級資料",
   news: "Google News RSS｜最近七日代號搜尋，顯示出版來源、發布時間及 Google 原文跳轉連結；未取得時標示未知",
   marketTrendUp: "lib/futu/nasdaq.ts → fetchEtfDaily(SPY)｜Nasdaq /api/quote/SPY/historical",
   sectorStrong: "lib/futu/nasdaq.ts → fetchEtfDaily(sector ETF)｜Nasdaq /api/quote/{ETF}/historical",
   indicators: "lib/indicators/indicators.ts｜由 candlesDaily 本地計算（EMA/RSI/MACD/KD/布林/ATR/20日成交量加權均價）",
-  scoring: "lib/scoring/scoring.ts｜本地評分模型（基本面30+估值20+技術30+情緒20=100）",
+  scoring: "本地研究模型：基本面30、估值20、技術30、情緒20；只按已知權重正規化，非買賣指令",
 };
 
 const FINANCIAL_FIELDS: [keyof Financials, string, string][] = [
@@ -74,6 +81,17 @@ function Block({ n, title, fable, children }: { n: number; title: string; fable?
       {children}
     </section>
   );
+}
+
+function StrategyChecks({ checks }: { checks: StrategyCheck[] }) {
+  return <ul className="text-xs space-y-2 mt-2">
+    {checks.map(check => <li key={check.name}>
+      <span className={check.pass === null ? "text-muted" : check.pass ? "text-ok" : "text-warn"}>
+        {check.pass === null ? "未能判斷" : check.pass ? "達標" : "未達標"} · {check.name}
+      </span>
+      <div className="text-muted">{check.note}</div>
+    </li>)}
+  </ul>;
 }
 
 class ReportRequestError extends Error {
@@ -160,22 +178,33 @@ function ReportView({ symbol }: { symbol: string }) {
         )}
       </Block>
 
+      <MissingDataSummary report={r} />
+
       {/* 2 評分總覽 */}
-      <Block n={2} title="評分總覽 + 評級">
+      <Block n={2} title="已知項目評分與資料覆蓋">
         <div className="flex flex-wrap items-center gap-3">
           <div className="text-4xl font-bold whitespace-nowrap" style={{ color }}>
-            {r.score.total}
+            {r.score.total ?? "未知"}
             <span className="text-base text-muted">/100</span>
           </div>
           <div className="px-3 py-1 rounded-full text-sm font-semibold" style={{ background: `${color}22`, color }}>
             {r.score.tier}
           </div>
         </div>
-        {r.score.completeness.percent < 100 && <p className="text-xs text-muted mt-2">此為已知部分得分。</p>}
+        <p className="text-xs text-muted mt-2">只評估已知項目，缺失不當零分。分數不是買入指令，資料覆蓋率不是準確率或獲利機率。</p>
+        <p className="text-xs text-muted mt-1">計分依據：已知得分 {r.score.earnedPoints.toFixed(2)} ÷ 可用權重 {r.score.completeness.availablePoints} × 100；不同缺項的股票不宜只比較總分。</p>
         <div className="text-sm text-warn mt-2">
-          評分資料完整度 {r.score.completeness.percent}%（按評分權重計算；不代表資料真實度）
-          {r.score.completeness.missing.length > 0 && <div>缺失：{r.score.completeness.missing.join("；")}。缺失項不計分，未重新放大其餘分數。</div>}
+          評分資料覆蓋率 {r.score.completeness.percent}%（按評分權重計算；不代表資料真實度）
+          {r.score.completeness.missing.length > 0 && <div>缺失：{r.score.completeness.missing.join("；")}。缺失項退出分母，其餘已知項目按原有權重比例換算；此為部分評估，缺項可能改變結論。</div>}
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+          {r.score.dimensions.map(d => <div key={d.dimension} className="card p-3 text-sm" data-testid={`dimension-${d.dimension}`}>
+            <div className="font-semibold">{d.dimension}：{d.score === null ? "未能評估" : `${d.score}/100`}</div>
+            <div className="text-muted text-xs mt-1">資料覆蓋 {d.coverage}%（可用權重 {d.availablePoints}/{d.max}）</div>
+            {d.missing.length > 0 && <div className="text-xs text-warn mt-1">未確認：{d.missing.join("、")}</div>}
+          </div>)}
+        </div>
+        <p className="text-xs text-muted mt-2">技術評分使用最新可用日線；如該日未收盤，分數仍可能變動。下方入場條件另按已收盤日線判斷。</p>
         {r.score.proxies.length > 0 && (
           <div className="text-xs text-muted mt-2">註：{r.score.proxies.join("；")}</div>
         )}
@@ -195,14 +224,29 @@ function ReportView({ symbol }: { symbol: string }) {
             {r.score.factors.map((f, i) => (
               <tr key={i} className="border-b border-line last:border-0">
                 <td className="py-1 text-muted">{f.dimension}</td>
-                <td>{f.sub}</td>
+                <td>{f.sub}{f.note && <p className="text-xs text-muted mt-1">{f.note}</p>}</td>
                 <td className="text-right">
-                  {f.available === false ? f.availableMax ? `${f.score}（部分資料）` : "未知" : f.score} / {f.max}
+                  {(f.availableMax ?? (f.available === false ? 0 : f.max)) === 0 ? "未知" : `${+f.score.toFixed(2)} / ${+(f.availableMax ?? f.max).toFixed(2)}${f.available === false ? "（部分資料）" : ""}`}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        <details className="mt-3 text-sm" data-testid="valuation-inputs">
+          <summary className="cursor-pointer text-accent">估值輸入與更新時間</summary>
+          <div className="text-xs text-muted mt-2 space-y-1">
+            <p>市值（美元）：{r.marketCap?.value == null ? "未知" : r.marketCap.value.toLocaleString()}</p>
+            <p>市值來源：{r.marketCap ? "Nasdaq summary／MarketCap" : "未取得可核對的市值來源紀錄"}</p>
+            <p>市值供應商更新時間：未知；供應商更新頻率：未知。</p>
+            <p>市值讀取時間：{r.marketCap ? new Date(r.marketCap.fetchedAt * 1000).toLocaleString() : "未知"}（不是供應商更新時間）</p>
+            <p>讀取方式：查詢報告時按需讀取，程式不快取市值；不保證上游即時更新。</p>
+            <p>估值財年期末：{r.valuation?.financialPeriodEnd ?? "未知"}</p>
+            <p>年度淨利（美元）：{r.valuation?.annualNetIncomeUSD == null ? "未知" : r.valuation.annualNetIncomeUSD.toLocaleString()}</p>
+            <p>年度 P/E：{r.valuation?.pe == null ? "未知／不適用" : r.valuation.pe.toFixed(2)}；歷史年度 PEG：{r.valuation?.peg == null ? "未知／不適用" : r.valuation.peg.toFixed(2)}</p>
+            <p>{r.valuation?.pegMessage ?? "未取得完整可核對的歷史 PEG 輸入；不填入假設值。"}</p>
+            <p>PEG 研究公式：市值 ÷ 同年度淨利 ÷ SEC 年度 EPS 增長百分點；財年不一致時不計算，亦非預期 PEG。</p>
+          </div>
+        </details>
         {r.financials && <details className="mt-3 text-sm">
           <summary className="cursor-pointer text-accent">財務數值與缺失說明</summary>
           <p className="text-muted text-xs my-2">財年期末：{r.financials.periodEnd ?? (r.mode === "demo" ? "示範資料" : "未知")}。以下包括披露數值及推導值，未知項目不以零補缺。</p>
@@ -215,6 +259,12 @@ function ReportView({ symbol }: { symbol: string }) {
               </div>;
             })}
           </dl>
+          {r.financials.epsEvidence && <div className="text-xs text-muted mt-3 space-y-1" data-testid="eps-evidence">
+            <p>SEC 年度攤薄 EPS（美元／股）：{r.financials.epsEvidence.currentEnd}：{r.financials.epsEvidence.current}；{r.financials.epsEvidence.previousEnd}：{r.financials.epsEvidence.previous}</p>
+            <p>申報：{r.financials.epsEvidence.form}；提交日期：{r.financials.epsEvidence.filed}；編號：{r.financials.epsEvidence.accession}</p>
+            <a href={r.financials.epsEvidence.url} target="_blank" rel="noopener noreferrer" className="text-accent">核對 SEC 原始 EPS 資料</a>
+            <p>使用同一申報的比較數字，可能包含重述或拆股調整；不代表已完成逐筆拆股核實或歷史時點回測。</p>
+          </div>}
         </details>}
       </Block>
 
@@ -245,12 +295,29 @@ function ReportView({ symbol }: { symbol: string }) {
       {/* 6 交易計畫 */}
       <Block n={6} title="交易 / 投資計畫">
         <p className="text-xs text-muted mb-2">以下為近期高低價及實際 ATR 推導的模型參考價，並非分析師目標價；未經費用及樣本外回測驗證。</p>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <div><span className="text-muted">買入區間：</span>{r.plan.buyZone}</div>
-          <div><span className="text-muted">入場參考：</span>${r.plan.entry}</div>
-          <div><span className="text-muted">目標價：</span><span className="text-ok">${r.plan.target}</span></div>
-          <div><span className="text-muted">停損點：</span><span className="text-bad">${r.plan.stop}</span></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div data-testid="technical-strategy">
+            <h3 className="font-semibold">技術策略：{r.strategy.technical.status}</h3>
+            <p className="text-xs text-muted mt-1">評估日線：{r.strategy.technical.evaluatedBarTime === null ? "未知" : new Date(r.strategy.technical.evaluatedBarTime * 1000).toISOString().slice(0, 10)}；符合條件仍需下一交易時段重新核價。</p>
+            <StrategyChecks checks={r.strategy.technical.checks} />
+          </div>
+          <div data-testid="fundamental-strategy">
+            <h3 className="font-semibold">基本面／估值策略：{r.strategy.fundamental.status}</h3>
+            <p className="text-xs text-muted mt-1">完整資料及兩部分均達 65 分，只代表通過研究門檻；仍需等待技術觸發。分析師評級、新聞及大盤缺失不直接扣除此策略分數。</p>
+            <StrategyChecks checks={r.strategy.fundamental.checks} />
+          </div>
         </div>
+        {r.plan ? <div className="mt-4 text-sm" data-testid="reference-plan">
+          <p className="font-semibold mb-2">{r.strategy.technical.status === "符合入場條件" ? "條件成立的模型入場參考" : "觀察參考價（目前未符合入場條件）"}</p>
+          <div className="flex flex-wrap gap-4">
+            <div><span className="text-muted">近期價格區間：</span>{r.plan.buyZone}</div>
+            <div><span className="text-muted">入場參考：</span>${r.plan.entry}</div>
+            <div><span className="text-muted">模型目標價：</span>${r.plan.target}</div>
+            <div><span className="text-muted">模型停損點：</span>${r.plan.stop}</div>
+            <div><span className="text-muted">毛風險回報：</span>{r.strategy.technical.rewardRisk?.toFixed(2)}:1</div>
+          </div>
+        </div> : <p className="text-sm text-warn mt-3">未產生入場參考價：必要資料不足，或價格／止損條件無效。詳見上述檢查。</p>}
+        <ul className="text-xs text-warn mt-3 space-y-1">{r.strategy.caveats.map(note => <li key={note}>{note}</li>)}</ul>
       </Block>
 
       {/* 7 策略審查 */}
@@ -283,6 +350,7 @@ function ReportView({ symbol }: { symbol: string }) {
 
       {/* 9 買入理由（圖+新聞） */}
       <Block n={9} title={r.newsStatus === "disabled" ? "買入理由區（價格圖；新聞暫停）" : "買入理由區（圖 + 新聞）"} fable>
+        <p className="text-xs text-muted mb-2">圖中買點為歷史已收盤訊號，並非目前買入推薦；當前狀態請看交易／投資計畫。</p>
         <div className="mb-3"><Chart candles={r.candlesDaily} buyPoints={r.buyPoints} height={300} /></div>
         {r.newsMessage && <p className="text-sm text-muted mb-2">{r.newsMessage}</p>}
         {r.mode === "real" && r.news.length === 0 && (r.newsStatus === "unavailable" || r.newsStatus === "rate_limited") && googleNewsUrl && (

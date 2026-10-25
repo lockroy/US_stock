@@ -1,4 +1,187 @@
 import { test, expect, type Page } from "@playwright/test";
+import { score, type ScoreInput } from "../../lib/scoring/scoring";
+import { assessStrategy } from "../../lib/fable/strategy";
+import { audit, buildMemo, buildRules, findBuyPoints } from "../../lib/fable/fable";
+import { computeIndicators } from "../../lib/indicators/indicators";
+import type { StockReport } from "../../lib/types";
+import { parseAnnualEps } from "../../lib/futu/sec";
+
+function refreshStrategyFixture(report: StockReport, inputs: Partial<ScoreInput> = {}) {
+  const now = new Date("2026-10-16T20:01:00Z");
+  const indicators = computeIndicators(report.candlesDaily);
+  report.score = score({ financials: null, valuation: null, ratings: null, marketTrendUp: null, sectorStrong: null, indicators, ...inputs });
+  report.valuation = inputs.valuation ?? null;
+  report.strategy = assessStrategy(report.score, report.candlesDaily, report.quote, now);
+  report.plan = report.strategy.technical.referencePlan;
+  report.memo = buildMemo(indicators, report.candlesDaily);
+  report.rules = buildRules(report.memo);
+  report.buyPoints = findBuyPoints(report.candlesDaily, now);
+  report.audit = audit(report.score, report.memo, report.plan);
+}
+
+async function strategyFixture(request: import("@playwright/test").APIRequestContext) {
+  const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
+  expect(response.ok()).toBe(true);
+  const report: StockReport = await response.json();
+  const time = Date.parse("2026-10-16T00:00:00Z") / 1000;
+  report.candlesDaily = Array.from({ length: 200 }, (_, i) => {
+    const close = 100 + i * 0.1;
+    return { time: time - (199 - i) * 86400, open: close, close, high: close + 0.2, low: close - 0.2, volume: 1000 };
+  });
+  report.candlesDaily[180].high = 150;
+  Object.assign(report.candlesDaily[199], { open: 120.8, close: 120.8, high: 121, low: 120.6, volume: 1500 });
+  report.mode = "real";
+  report.candlesIntraday = [];
+  report.financials = null;
+  Object.assign(report.quote, { lastPrice: 120.8, change: null, changePct: null, volume: null, timestamp: null, isRealTime: null });
+  report.news = [];
+  report.newsStatus = "disabled";
+  report.newsMessage = "新聞功能暫停，未請求外部新聞來源。";
+  refreshStrategyFixture(report);
+  report.sources = { quote: "nasdaq", candlesDaily: "nasdaq", financials: "unknown", valuation: "unknown", ratings: "unknown", news: "unknown", scoring: "derived" };
+  return report;
+}
+
+test("SEC EPS evidence and historical PEG cannot look like forecast analyst data", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  const evidence = parseAnnualEps({ cik: 320193, facts: { "us-gaap": { EarningsPerShareDiluted: { units: { "USD/shares": [
+    { start: "2024-10-01", end: "2025-09-30", val: 6, accn: "0000320193-25-000079", filed: "2025-11-01", form: "10-K", fp: "FY" },
+    { start: "2023-10-01", end: "2024-09-30", val: 5, accn: "0000320193-25-000079", filed: "2025-11-01", form: "10-K", fp: "FY" },
+  ] } } } } }, "0000320193", "9/30/2025", new Date("2026-10-24T00:00:00Z")).evidence!;
+  report.financials = { revenueGrowth: 15, epsGrowth: 20, netIncomeGrowth: 10, grossMargin: 50, roe: 50, roic: 50, fcf: 1, debtToEquity: 0.5,
+    periodEnd: "9/30/2025", epsEvidence: evidence };
+  const pegBasis = "歷史年度 PEG＝年度 P/E ÷ SEC 年度攤薄 EPS 同比增長百分點；不是分析師預期 PEG。";
+  refreshStrategyFixture(report, { financials: report.financials, valuation: { pe: 25, peg: 1.25, pb: 3, ps: null, evSales: null, fcfYield: 3, pegBasis } });
+  report.sources.financials = "nasdaq";
+  report.sources.valuation = "derived";
+  report.sources.epsGrowth = "sec";
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await expect(page.getByText("EPS·SEC 原始申報", { exact: true })).toBeVisible();
+  await expect(page.getByText(pegBasis, { exact: true })).toBeVisible();
+  await page.getByText("財務數值與缺失說明", { exact: true }).click();
+  await expect(page.getByText("EPS 增長：20%", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("eps-evidence")).toContainText("2025-09-30：6；2024-09-30：5");
+  await expect(page.getByTestId("eps-evidence")).toContainText("提交日期：2025-11-01");
+  const link = page.getByRole("link", { name: "核對 SEC 原始 EPS 資料" });
+  await expect(link).toHaveAttribute("href", evidence.url);
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(page.getByTestId("missing-data-summary").locator('[data-missing-id="financials.epsGrowth"]')).toHaveCount(0);
+  report.marketCap = { value: 1_000_000, currency: "USD", source: "nasdaq", fetchedAt: 1792368000, asOf: null, refreshPolicy: "on-demand-no-store" };
+  report.valuation = { ...report.valuation!, financialPeriodEnd: "9/30/2025", annualNetIncomeUSD: 40_000 };
+  await page.reload();
+  await page.getByText("估值輸入與更新時間", { exact: true }).click();
+  const valuation = page.getByTestId("valuation-inputs");
+  await expect(valuation).toContainText("市值（美元）：1,000,000");
+  await expect(valuation).toContainText("市值供應商更新時間：未知；供應商更新頻率：未知");
+  await expect(valuation).toContainText("不是供應商更新時間");
+  await expect(valuation).toContainText("歷史年度 PEG：1.25");
+  await noOverflow(page);
+});
+
+test("complete research inputs align scores, missing summary, stop and entry status", async ({ page, request }, info) => {
+  // 受控情境驗收；不代表現時真實供應商已提供 EPS／PEG。
+  const report = await strategyFixture(request);
+  report.financials = { revenueGrowth: 15, epsGrowth: 15, netIncomeGrowth: 15, grossMargin: 50,
+    roe: 50, roic: 50, debtToEquity: 0.5, fcf: 1, periodEnd: "2025-12-31" };
+  Object.assign(report.quote, { change: 0.8, changePct: 0.67, volume: 1500, asOf: "Oct 16, 2026 4:01 PM ET", isRealTime: false });
+  report.sources.financials = "nasdaq";
+  report.sources.valuation = "derived";
+  refreshStrategyFixture(report, { financials: report.financials,
+    valuation: { pe: 10, peg: 1, pb: 1, ps: null, evSales: null, fcfYield: 8 }, marketTrendUp: true, sectorStrong: true });
+  expect(report.score.completeness.percent).toBe(87); // 評級未接入，保留為未知
+  expect(report.strategy.technical.rewardRisk).toBeGreaterThanOrEqual(2);
+  expect(report.plan!.stop).toBeLessThan(report.plan!.entry);
+  expect(report.plan!.entry).toBeLessThan(report.plan!.target);
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await reportReady(page);
+  await expect(page.getByTestId("dimension-基本面")).toContainText("基本面：100/100");
+  await expect(page.getByTestId("dimension-估值")).toContainText("估值：100/100");
+  await expect(page.getByTestId("missing-data-count")).toHaveText("未齊全資料：2 項");
+  await expect(page.getByTestId("missing-data-list").locator("[data-missing-id]")).toHaveCount(2);
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：符合入場條件");
+  await expect(page.getByTestId("fundamental-strategy")).toContainText("基本面／估值策略：符合入場條件");
+  await expect(page.getByTestId("reference-plan")).toContainText(`模型停損點：$${report.plan!.stop}`);
+  await expect(page.getByText("審查結果：未驗證", { exact: true })).toBeVisible();
+  await expect(page.getByText(/報價未確認為即時；實際下單前須重新核對/)).toBeVisible();
+  await noOverflow(page);
+  await page.screenshot({ path: info.outputPath("complete-research-inputs.png"), fullPage: true });
+});
+
+test("partial scores keep technical opportunities separate from unknown fundamentals", async ({ page, request }, info) => {
+  const report = await strategyFixture(request);
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await reportReady(page);
+  await expect(page.getByTestId("dimension-基本面")).toContainText("未能評估");
+  await expect(page.getByTestId("dimension-基本面")).toContainText("資料覆蓋 0%");
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：符合入場條件");
+  await expect(page.getByTestId("fundamental-strategy")).toContainText("基本面／估值策略：資料不足");
+  await expect(page.getByText("已知項目評分（非完整總評）", { exact: true })).toBeVisible();
+  await expect(page.getByText(/計分依據：已知得分 .* ÷ 可用權重 30 × 100/)).toBeVisible();
+  await expect(page.getByTestId("reference-plan")).toContainText("條件成立的模型入場參考");
+  await noOverflow(page);
+  await page.screenshot({ path: info.outputPath("partial-score-strategy.png"), fullPage: true });
+});
+
+test("missing data summary counts unique inputs and separates paused news and unverified research", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  const summary = page.getByTestId("missing-data-summary");
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：18 項");
+  await expect(summary.locator("[data-missing-id]")).toHaveCount(18);
+  await expect(summary.locator('[data-missing-id="ratings"]')).toHaveCount(1);
+  await expect(summary.locator('[data-missing-id="financials.epsGrowth"]')).toContainText("EPS 增長");
+  await expect(summary.locator('[data-missing-id="financials.fcf"]')).toContainText("自由現金流");
+  await expect(summary.getByText("新聞：已暫停，另列顯示，不計入上述缺項總數。", { exact: true })).toBeVisible();
+  await expect(summary.getByText("策略驗證待完成：5 項（不計入資料缺項）", { exact: true })).toBeVisible();
+
+  report.financials = { revenueGrowth: 0, epsGrowth: 0, grossMargin: 0, roe: 0, roic: 0, debtToEquity: 0, fcf: 0, netIncomeGrowth: 0 };
+  await page.reload();
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：10 項");
+  await expect(summary.locator('[data-missing-id^="financials."]')).toHaveCount(0);
+  report.newsStatus = "unavailable";
+  await page.reload();
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：11 項");
+  await expect(summary.locator('[data-missing-id="news"]')).toContainText("新聞資料");
+  report.newsStatus = "empty";
+  await page.reload();
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：10 項");
+  await expect(summary.locator('[data-missing-id="news"]')).toHaveCount(0);
+  await noOverflow(page);
+});
+
+test("insufficient technical inputs hide entry prices without displaying a bearish score", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  report.candlesDaily = report.candlesDaily.map(c => ({ ...c, volume: 0 }));
+  refreshStrategyFixture(report);
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：資料不足");
+  await expect(page.getByTestId("missing-data-summary").locator('[data-missing-id="technical.volume"]')).toHaveCount(1);
+  await expect(page.getByTestId("reference-plan")).toHaveCount(0);
+  await expect(page.getByText(/未產生入場參考價/)).toBeVisible();
+  await expect(page.getByText(/避開 \/ 賣出|強烈建議買入/)).toHaveCount(0);
+  await noOverflow(page);
+});
+
+test("untriggered setups display waiting and observed weak reward-risk displays failure", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  report.candlesDaily[199].volume = 1000;
+  refreshStrategyFixture(report);
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：等待觸發");
+  await expect(page.getByTestId("reference-plan")).toContainText("觀察參考價（目前未符合入場條件）");
+  report.candlesDaily[180].high = report.candlesDaily[180].close + 0.2;
+  refreshStrategyFixture(report);
+  await page.reload();
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：條件不符合");
+  await expect(page.getByTestId("technical-strategy")).toContainText("未達標 · 毛風險回報");
+  await noOverflow(page);
+});
 
 test("unknown quote fields cannot look like unchanged prices or zero volume", async ({ page, request }) => {
   const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");

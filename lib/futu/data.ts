@@ -4,6 +4,7 @@ import { validateCandles } from "../indicators/indicators";
 import { aggregateCandles } from "./candles";
 import * as mock from "./mock";
 import { getNews } from "../news/provider";
+import { fetchFinancialsWithEps } from "./financial-source";
 
 export type DataKind = "quote" | "candles" | "financials" | "valuation" | "ratings" | "news";
 type StockData = Quote | Candle[] | Financials | Valuation | Ratings | NewsItem[];
@@ -24,13 +25,14 @@ export async function getStockData(kind: DataKind, symbol: string, rawRange = "d
     return { ...response, ...news };
   }
   if (kind === "financials") {
-    const data = real ? (await provider.fetchFinancials(context.symbol))?.fin ?? null : mock.mockFinancials(context.symbol);
-    return { ...response, source: data ? real ? "nasdaq" : "mock" : "unknown", data };
+    const data = real ? (await fetchFinancialsWithEps(context.symbol, provider, options.epsProvider))?.fin ?? null : mock.mockFinancials(context.symbol);
+    return { ...response, source: data ? real ? data.epsEvidence ? "derived" : "nasdaq" : "mock" : "unknown", data,
+      ...(real && data?.epsEvidence ? { sources: { financials: "nasdaq" as const, epsGrowth: "sec" as const } } : {}) };
   }
   if (kind === "valuation") {
     if (!real) return { ...response, source: "mock", data: mock.mockValuation(context.symbol) };
-    const [summary, raw] = await Promise.all([provider.fetchSummary(context.symbol), provider.fetchFinancials(context.symbol)]);
-    const data = summary && raw ? provider.deriveValuation(summary.marketCap, raw) : null;
+    const [summary, raw] = await Promise.all([provider.fetchSummary(context.symbol), fetchFinancialsWithEps(context.symbol, provider, options.epsProvider)]);
+    const data = summary && raw ? provider.deriveValuation(summary.marketCap, raw, summary.marketCapSnapshot) : null;
     return { ...response, source: data ? "derived" : "unknown", data };
   }
   const range = rawRange as Range;

@@ -42,6 +42,24 @@ export interface Financials {
   fcf: number | null; // Nasdaq: 千美元
   periodEnd?: string;
   notes?: Record<string, string>;
+  epsEvidence?: EpsEvidence;
+}
+
+export interface EpsEvidence {
+  source: "sec";
+  cik: string;
+  metric: "EarningsPerShareDiluted";
+  unit: "USD/shares";
+  current: number;
+  previous: number;
+  currentStart: string;
+  currentEnd: string;
+  previousStart: string;
+  previousEnd: string;
+  filed: string;
+  accession: string;
+  form: string;
+  url: string;
 }
 
 export interface Valuation {
@@ -51,6 +69,20 @@ export interface Valuation {
   fcfYield: number | null;
   ps: number | null; // fallback for loss-making
   evSales: number | null; // fallback
+  pegBasis?: string;
+  pegMessage?: string;
+  financialPeriodEnd?: string;
+  annualNetIncomeUSD?: number | null;
+  marketCapSnapshot?: MarketCapSnapshot;
+}
+
+export interface MarketCapSnapshot {
+  value: number | null;
+  currency: "USD";
+  source: "nasdaq";
+  fetchedAt: number; // 讀取時間，非供應商更新時間
+  asOf: null; // 尚未取得明確的市值更新時間
+  refreshPolicy: "on-demand-no-store";
 }
 
 export interface Ratings {
@@ -96,14 +128,47 @@ export interface FactorScore {
   available?: boolean;
   availableMax?: number;
   missingInputs?: string[];
+  note?: string;
 }
 
 export interface ScoreResult {
-  total: number; // 0-100
-  tier: string; // 評級
+  total: number | null; // 已知項目加權得分 / 可用權重 × 100；無資料為 null
+  earnedPoints: number; // 原始已知得分，不是 /100 的總評
+  tier: string; // 資料範圍標籤，不是買賣指令
+  dimensions: DimensionScore[];
   factors: FactorScore[];
   proxies: string[]; // 代理指標說明
   completeness: { percent: number; availablePoints: number; missing: string[] };
+}
+
+export interface DimensionScore {
+  dimension: string;
+  score: number | null;
+  earnedPoints: number;
+  availablePoints: number;
+  max: number;
+  coverage: number;
+  missing: string[];
+}
+
+export type StrategyStatus = "符合入場條件" | "等待觸發" | "條件不符合" | "資料不足";
+
+export interface StrategyCheck {
+  name: string;
+  pass: boolean | null;
+  note: string;
+}
+
+export interface StrategyAssessment {
+  technical: {
+    status: StrategyStatus;
+    checks: StrategyCheck[];
+    evaluatedBarTime: number | null;
+    referencePlan: TradePlan | null;
+    rewardRisk: number | null;
+  };
+  fundamental: { status: StrategyStatus; checks: StrategyCheck[] };
+  caveats: string[];
 }
 
 // Fable 增強
@@ -149,17 +214,20 @@ export interface BuyPoint {
   reason: string;
 }
 
-export type DataSource = "nasdaq" | "finnhub" | "google_news" | "mock" | "derived" | "proxy" | "unknown";
+export type DataSource = "nasdaq" | "sec" | "finnhub" | "google_news" | "mock" | "derived" | "proxy" | "unknown";
 
 // 完整報告
 export interface StockReport {
   quote: Quote;
   mode: "real" | "demo";
   score: ScoreResult;
+  strategy: StrategyAssessment;
   financials?: Financials | null;
+  valuation?: Valuation | null;
+  marketCap?: MarketCapSnapshot | null;
   memo: ResearchMemo;
   rules: TradeRule[];
-  plan: TradePlan;
+  plan: TradePlan | null;
   audit: AuditResult;
   buyPoints: BuyPoint[];
   news: NewsItem[];
@@ -180,6 +248,7 @@ export interface DataResponse<T> {
   query?: string;
   range?: Range;
   inputSource?: DataSource;
+  sources?: Record<string, DataSource>;
   status?: import("./news/types").NewsResult["status"];
   fetchedAt?: number;
   diagnosticId?: string;

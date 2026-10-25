@@ -47,11 +47,11 @@ test("unknown macro inputs earn no optimistic points; observed weakness stays di
   assert.equal(scoreSentiment(null, true, true).score, 7);
 });
 
-test("real report preserves unknowns, exposes weighted completeness and suppresses tier", async () => {
+test("real report preserves unknowns and separates partial scores from strategy readiness", async () => {
   const report = await buildReport(" aapl ", { provider, newsProvider: unavailableNews, realData: true });
   assert.equal(report.mode, "real");
   assert.equal(report.score.completeness.percent, 30);
-  assert.equal(report.score.tier, "資料不足 / 暫不評級");
+  assert.equal(report.score.tier, "已知項目評分（非完整總評）");
   assert.equal(report.sources.sectorStrong, "unknown");
   assert.equal(report.sources.marketTrendUp, "unknown");
   assert.equal(report.sources.financials, "unknown");
@@ -60,7 +60,8 @@ test("real report preserves unknowns, exposes weighted completeness and suppress
   assert.equal(report.sources.news, "unknown");
   assert.deepEqual(report.news, []);
   assert.deepEqual(report.candlesIntraday, []);
-  assert.equal(report.score.total, Math.round(report.score.factors.reduce((sum, f) => sum + f.score, 0)));
+  assert.equal(report.score.total, Math.round(report.score.earnedPoints / report.score.completeness.availablePoints * 100));
+  assert.equal(report.strategy.fundamental.status, "資料不足");
   assert.notEqual(report.audit.verdict, "核准");
 });
 
@@ -143,7 +144,7 @@ test("report HTTP handler returns 400, 404 and 503 with actionable errors", asyn
 });
 
 
-test("missing valuation fields reduce completeness without inflating known scores", () => {
+test("missing valuation fields reduce coverage and keep raw earned points separate", () => {
   const input = {
     financials: mock.mockFinancials("US.AAPL"),
     valuation: { ...mock.mockValuation("US.AAPL"), peg: null, pb: null },
@@ -152,8 +153,8 @@ test("missing valuation fields reduce completeness without inflating known score
   };
   const result = score(input);
   assert.equal(result.completeness.percent, 88);
-  assert.equal(result.tier, "資料不足 / 暫不評級");
-  assert.equal(result.factors.find(f => f.sub === "P/E")?.available, undefined);
+  assert.equal(result.tier, "已知項目評分（非完整總評）");
+  assert.equal(result.factors.find(f => f.sub === "P/E")?.available, true);
   assert.equal(result.factors.find(f => f.sub === "PEG")?.available, false);
   assert.equal(result.factors.find(f => f.sub === "P/B")?.available, false);
 });

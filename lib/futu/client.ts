@@ -1,14 +1,17 @@
 import { normalizeTicker } from "./symbol";
-import type { StockReport, Candle, Financials, Valuation, Ratings, NewsItem, Quote, DataSource } from "../types";
+import type { StockReport, Candle, Financials, Valuation, Ratings, NewsItem, Quote, DataSource, MarketCapSnapshot } from "../types";
 import { computeIndicators } from "../indicators/indicators";
 import { score } from "../scoring/scoring";
-import { buildMemo, buildPlan, buildRules, audit, findBuyPoints } from "../fable/fable";
+import { buildMemo, buildRules, audit, findBuyPoints } from "../fable/fable";
+import { assessStrategy } from "../fable/strategy";
 import * as mock from "./mock";
 import * as nasdaq from "./nasdaq";
 import { getNews } from "../news/provider";
 import type { NewsProvider, NewsResult } from "../news/types";
 import { searchDirectory } from "./directory";
 import { normalizeSearchQuery } from "./symbol";
+import { fetchFinancialsWithEps } from "./financial-source";
+import type { EpsProvider } from "./sec";
 
 export class ReportError extends Error {
   constructor(public code: "INVALID_SYMBOL" | "INVALID_RANGE" | "SYMBOL_NOT_FOUND" | "DATA_UNAVAILABLE", message: string) {
@@ -32,6 +35,7 @@ export interface ReportOptions {
   provider?: typeof nasdaq;
   newsProvider?: NewsProvider;
   directorySearch?: typeof searchDirectory;
+  epsProvider?: EpsProvider;
 }
 
 // 所有股票資料入口共用模式、代號與存在性驗證。
@@ -56,6 +60,7 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   let daily: Candle[];
   let financials: Financials | null;
   let valuation: Valuation | null;
+  let marketCap: MarketCapSnapshot | null = null;
   let ratings: Ratings | null;
   let news: NewsItem[];
   let newsResult: NewsResult | undefined;
@@ -66,7 +71,7 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
     quote = verifiedQuote;
     const [candles, summary, finRaw, spyTrend, fetchedNews] = await Promise.all([
       provider.fetchDaily(symbol), provider.fetchSummary(symbol),
-      provider.fetchFinancials(symbol), provider.fetchSpyTrend(),
+      fetchFinancialsWithEps(symbol, provider, options.epsProvider), provider.fetchSpyTrend(),
       getNews(symbol, options.newsProvider),
     ]);
     if (!candles || candles.length < 200) {
@@ -74,7 +79,8 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
     }
     daily = candles;
     financials = finRaw?.fin ?? null;
-    valuation = summary && finRaw ? provider.deriveValuation(summary.marketCap, finRaw) : null;
+    marketCap = summary?.marketCapSnapshot ?? null;
+    valuation = summary && finRaw ? provider.deriveValuation(summary.marketCap, finRaw, summary.marketCapSnapshot) : null;
     ratings = null;
     newsResult = fetchedNews;
     news = newsResult.data;
@@ -82,7 +88,9 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
     sectorStrong = summary ? await provider.fetchSectorStrength(summary.sector) : null;
     sources.quote = sources.candlesDaily = "nasdaq";
     sources.financials = financials ? "nasdaq" : "unknown";
+    sources.epsGrowth = financials?.epsEvidence ? "sec" : "unknown";
     sources.valuation = valuation ? "derived" : "unknown";
+    sources.marketCap = summary?.marketCap != null && summary.marketCap > 0 ? "nasdaq" : "unknown";
     sources.ratings = "unknown";
     sources.news = newsResult.source;
     sources.marketTrendUp = marketTrendUp === null ? "unknown" : "nasdaq";
@@ -104,14 +112,13 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   }
   const scoreResult = score({ financials, valuation, ratings, indicators, marketTrendUp, sectorStrong });
   const memo = buildMemo(indicators, daily);
-  const plan = buildPlan(indicators, daily);
-  // 入場參考以本次報價為準，不混用上一次日線收盤價。
-  plan.entry = quote.lastPrice;
+  const strategy = assessStrategy(scoreResult, daily, quote);
+  const plan = strategy.technical.referencePlan;
   const intraday = real ? [] : mock.mockIntradayCandles(symbol);
   sources.candlesIntraday = real ? "unknown" : "mock";
   sources.indicators = sources.scoring = "derived";
   return {
-    quote, mode: real ? "real" : "demo", score: scoreResult, financials,
+    quote, mode: real ? "real" : "demo", score: scoreResult, strategy, financials, valuation, marketCap,
     memo, rules: buildRules(memo), plan, audit: audit(scoreResult, memo, plan),
     buyPoints: findBuyPoints(daily), news, newsStatus: newsResult?.status, newsMessage: newsResult?.message, newsFetchedAt: newsResult?.fetchedAt,
     candlesDaily: daily, candlesIntraday: intraday, sources,

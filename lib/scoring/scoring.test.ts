@@ -8,12 +8,12 @@ function v(partial: Partial<Valuation>): Valuation {
   return { pe: 25, peg: 1.2, pb: 4, fcfYield: 3, ps: null, evSales: null, ...partial };
 }
 
-// 場景 1：科技成長股（AAPL 類）P/B 50 + 高 ROE 55%
-// 期望：P/B 保底 1 分 + ROE 修正 +1 = 2/6，不得歸零
-const growth = scoreValuation(v({ pe: 35, peg: 1.8, pb: 50 }), 55);
+// 場景 1：科技成長股（AAPL 類）P/B 50；ROE 只在基本面計分
+// 期望：P/B 保底 1/6，不得歸零，不因 ROE 缺失改變估值
+const growth = scoreValuation(v({ pe: 35, peg: 1.8, pb: 50 }));
 const pbGrowth = growth.factors.find((f) => f.sub === "P/B")!;
 if (pbGrowth.score < 1) throw new Error(`科技股 P/B 不應歸零，得到 ${pbGrowth.score}`);
-console.log(`✓ 科技股 P/B 保底+ROE 修正: ${pbGrowth.score}/6`);
+console.log(`✓ 科技股 P/B 保底，獨立於 ROE: ${pbGrowth.score}/6`);
 console.log(`✓ 科技股估值總分: ${growth.score.toFixed(1)}/20`);
 if (growth.score <= 0 || growth.score > 20) throw new Error("估值總分越界");
 

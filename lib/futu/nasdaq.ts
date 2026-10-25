@@ -2,8 +2,9 @@
 // 覆蓋：即時報價、歷史日線（OHLCV）、年度財務四表、市值/產業、ETF 大盤與產業趨勢。
 // 不提供：分析師評級、個股新聞、日內分時（由上層標註未知）。
 // 注意：此為非官方公開端點，已對每個請求加逾時與失敗回 null（上層保持未知）。
-import type { Candle, Quote, Financials, Valuation } from "../types";
+import type { Candle, Quote, Financials, Valuation, MarketCapSnapshot } from "../types";
 import { validateCandles } from "../indicators/indicators";
+import { financialEnd } from "./sec";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -112,19 +113,23 @@ export interface NasdaqSummary {
   sector: string | null;
   industry: string | null;
   oneYrTarget: number | null;
+  marketCapSnapshot?: MarketCapSnapshot;
 }
 export async function fetchSummary(symbol: string): Promise<NasdaqSummary | null> {
   const ticker = toTicker(symbol);
   try {
     const res = await fetch(
       `https://api.nasdaq.com/api/quote/${ticker}/summary?assetclass=stocks`,
-      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(8000) }
+      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(8000), cache: "no-store" }
     );
     if (!res.ok) return null;
     const s = (await res.json())?.data?.summaryData;
     if (!s) return null;
+    const cap = parseFinancialNumber(s.MarketCap?.value);
+    const marketCap = cap !== null && cap > 0 ? cap : null;
     return {
-      marketCap: parseFinancialNumber(s.MarketCap?.value),
+      marketCap,
+      marketCapSnapshot: { value: marketCap, currency: "USD", source: "nasdaq", fetchedAt: Math.floor(Date.now() / 1000), asOf: null, refreshPolicy: "on-demand-no-store" },
       sector: (s.Sector?.value as string) || null,
       industry: (s.Industry?.value as string) || null,
       oneYrTarget: parseFinancialNumber(s.OneYrTarget?.value),
@@ -271,18 +276,35 @@ export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsR
 }
 
 // 估值只使用已知、有限且適用的輸入，不把缺債務／現金視為零。
-export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsRaw | null): Valuation | null {
+export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsRaw | null, snapshot?: MarketCapSnapshot): Valuation | null {
   if (!raw || !known(marketCap) || marketCap <= 0) return null;
+  if (snapshot && snapshot.value !== marketCap) return null;
   const { revenue, netIncome, totalEquity, totalDebt, cash, fin } = raw;
   const pe = known(netIncome) && netIncome > 0 ? marketCap / (netIncome * 1000) : null;
-  const peg = pe !== null && known(fin.epsGrowth) && fin.epsGrowth > 0 ? pe / fin.epsGrowth : null;
+  const evidence = fin.epsEvidence;
+  const aligned = !!evidence && !!fin.periodEnd && financialEnd(fin.periodEnd) === evidence.currentEnd;
+  const growth = evidence && known(evidence.current) && known(evidence.previous) && evidence.previous > 0
+    ? (evidence.current - evidence.previous) / evidence.previous * 100 : null;
+  const verifiedGrowth = evidence?.source === "sec" && evidence.metric === "EarningsPerShareDiluted"
+    && evidence.unit === "USD/shares" && aligned && known(growth) && known(fin.epsGrowth)
+    && Math.abs(growth - fin.epsGrowth) < 1e-8;
+  const peg = pe !== null && verifiedGrowth && fin.epsGrowth! > 0 ? pe / fin.epsGrowth! : null;
+  const pegMessage = !evidence ? "缺少 SEC 年度 EPS 證據，未計算 PEG。"
+    : !aligned ? "Nasdaq 財年與 SEC EPS 財年不一致，未計算 PEG。"
+    : !verifiedGrowth ? "EPS 增長不可用或與原始數值不一致，未計算 PEG。"
+    : fin.epsGrowth! <= 0 ? "歷史 EPS 增長非正數，PEG 不適用。"
+    : pe === null ? "缺少正數年度淨利，未計算 PEG。"
+    : "僅按本次市值輸入與同財年 EPS 計算；市值更新時點尚未由供應商確認。";
   const pb = known(totalEquity) && totalEquity > 0 ? marketCap / (totalEquity * 1000) : null;
   const ps = known(revenue) && revenue > 0 ? marketCap / (revenue * 1000) : null;
   const fcfYield = known(fin.fcf) ? fin.fcf * 1000 / marketCap * 100 : null;
   const ev = known(totalDebt) && known(cash) ? marketCap + totalDebt * 1000 - cash * 1000 : null;
   const evSales = known(ev) && known(revenue) && revenue > 0 ? ev / (revenue * 1000) : null;
   const finite = (value: number | null) => known(value) ? value : null;
-  return { pe: finite(pe), peg: finite(peg), pb: finite(pb), fcfYield: finite(fcfYield), ps: finite(ps), evSales: finite(evSales) };
+  return { pe: finite(pe), peg: finite(peg), pb: finite(pb), fcfYield: finite(fcfYield), ps: finite(ps), evSales: finite(evSales),
+    pegBasis: "歷史年度 PEG＝市值／年度淨利 ÷ SEC 年度攤薄 EPS 同比增長百分點；不是 TTM 或分析師預期 PEG；增長非正數時不適用。",
+    pegMessage, financialPeriodEnd: fin.periodEnd, annualNetIncomeUSD: known(netIncome) ? finite(netIncome * 1000) : null,
+    ...(snapshot ? { marketCapSnapshot: snapshot } : {}) };
 }
 
 // 產業 → SPDR 產業 ETF 映射（相對強弱用）

@@ -45,7 +45,7 @@ export function buildMemo(ind: IndicatorSnapshot, candles: Candle[]): ResearchMe
 
 // Nasdaq 日線的日期是 UTC 午夜標籤；美東時間 16:00 前不確認當日訊號。
 // 提早收市日也保守等到 16:00，不推測交易日曆或供應商是否完成最後更新。
-function closedDailyBar(time: number, asOf: Date): boolean {
+export function closedDailyBar(time: number, asOf: Date): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", hourCycle: "h23",
@@ -109,18 +109,18 @@ export function buildPlan(ind: IndicatorSnapshot, candles: Candle[]): TradePlan 
 }
 
 // 未執行的驗證保持未知；固定參數本身不是回測或費用證據。
-export function audit(score: ScoreResult, memo: ResearchMemo, plan: TradePlan): AuditResult {
-  const ordered = [plan.stop, plan.entry, plan.target].every(Number.isFinite)
+export function audit(score: ScoreResult, memo: ResearchMemo, plan: TradePlan | null): AuditResult {
+  const ordered = plan !== null && [plan.stop, plan.entry, plan.target].every(Number.isFinite)
     && plan.stop > 0 && plan.stop < plan.entry && plan.entry < plan.target;
-  const rewardRisk = ordered ? (plan.target - plan.entry) / (plan.entry - plan.stop) : null;
+  const rewardRisk = ordered && plan ? (plan.target - plan.entry) / (plan.entry - plan.stop) : null;
   const items: AuditItem[] = [
     { name: "前視偏誤", pass: null, note: "未驗證資料時間點與訊號執行時序" },
     { name: "交易費用", pass: null, note: "未納入手續費、點差與滑價，淨風險回報未驗證" },
     { name: "過度擬合", pass: null, note: "未執行跨市場樣本外回測" },
     { name: "交易次數", pass: null, note: "未統計回測交易數與訊號頻率" },
     { name: "市場狀態依賴", pass: null, note: "未驗證不同市場狀態的表現" },
-    { name: "價格次序", pass: ordered, note: ordered ? "停損 < 入場 < 目標" : "必須為有效正數，且停損 < 入場 < 目標" },
-    { name: "風險回報", pass: rewardRisk !== null && rewardRisk >= 2, note: rewardRisk === null ? "價格次序無效，無法計算" : `毛風險回報 ${rewardRisk.toFixed(2)}，最低要求 2（未扣費用）` },
+    { name: "價格次序", pass: plan === null ? null : ordered, note: plan === null ? "沒有可用參考價，未能審查；請看策略條件" : ordered ? "停損 < 入場 < 目標" : "必須為有效正數，且停損 < 入場 < 目標" },
+    { name: "風險回報", pass: plan === null ? null : rewardRisk !== null && rewardRisk >= 2, note: rewardRisk === null ? "沒有有效參考價，無法計算" : `毛風險回報 ${rewardRisk.toFixed(2)}，最低要求 2（未扣費用）` },
     { name: "失效條件", pass: memo.invalidation.trim().length > 0, note: memo.invalidation.trim() || "未定義失效條件" },
     { name: "評分資料", pass: score.completeness.percent === 100 ? true : null, note: `可用評分資料 ${score.completeness.percent}%；模擬模式不代表真實資料已驗證` },
   ];

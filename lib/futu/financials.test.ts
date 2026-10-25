@@ -113,7 +113,7 @@ test("partial fundamental factors reduce completeness and retain only known scor
   assert.equal(factors[2].score, 0);
   const result = score({ financials: fin, valuation: mock.mockValuation("AAPL"), ratings: mock.mockRatings("AAPL"), indicators: computeIndicators(mock.mockDailyCandles("AAPL")), marketTrendUp: true, sectorStrong: true });
   assert.equal(result.completeness.percent, 81.67);
-  assert.equal(result.tier, "資料不足 / 暫不評級");
+  assert.equal(result.tier, "已知項目評分（非完整總評）");
   assert.ok(result.completeness.missing.some(x => x.includes("EPS 增長")));
   assert.ok(Number.isFinite(result.total));
 });
