@@ -100,6 +100,7 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
       asOf: typeof p.lastTradeTimestamp === "string" && p.lastTradeTimestamp.trim() && p.lastTradeTimestamp !== "N/A" ? p.lastTradeTimestamp : null,
       fetchedAt: Math.floor(Date.now() / 1000),
       isRealTime,
+      marketStatus: typeof d.marketStatus === "string" && d.marketStatus.length <= 64 ? d.marketStatus : null,
     };
   } catch (error) {
     if (error instanceof QuoteLookupError) throw error;

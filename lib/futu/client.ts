@@ -12,6 +12,8 @@ import { searchDirectory } from "./directory";
 import { normalizeSearchQuery } from "./symbol";
 import { fetchFinancialsWithEps } from "./financial-source";
 import type { EpsProvider } from "./sec";
+import { calendarSnapshot } from "../market/calendar";
+import { quoteDay } from "../fable/timeliness";
 
 export class ReportError extends Error {
   constructor(public code: "INVALID_SYMBOL" | "INVALID_RANGE" | "SYMBOL_NOT_FOUND" | "DATA_UNAVAILABLE", message: string) {
@@ -112,7 +114,8 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   }
   const scoreResult = score({ financials, valuation, ratings, indicators, marketTrendUp, sectorStrong });
   const memo = buildMemo(indicators, daily);
-  const strategy = assessStrategy(scoreResult, daily, quote);
+  const assessedAt = new Date();
+  const strategy = assessStrategy(scoreResult, daily, quote, assessedAt);
   const plan = strategy.technical.referencePlan;
   const intraday = real ? [] : mock.mockIntradayCandles(symbol);
   sources.candlesIntraday = real ? "unknown" : "mock";
@@ -120,7 +123,10 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   return {
     quote, mode: real ? "real" : "demo", score: scoreResult, strategy, financials, valuation, marketCap,
     memo, rules: buildRules(memo), plan, audit: audit(scoreResult, memo, plan),
-    buyPoints: findBuyPoints(daily), news, newsStatus: newsResult?.status, newsMessage: newsResult?.message, newsFetchedAt: newsResult?.fetchedAt,
+    buyPoints: findBuyPoints(daily, assessedAt), news, newsStatus: newsResult?.status, newsMessage: newsResult?.message, newsFetchedAt: newsResult?.fetchedAt,
+    timing: { calendar: calendarSnapshot(assessedAt), quoteDate: quoteDay(quote),
+      lastAvailableDailyDate: daily.length ? new Date(daily[daily.length - 1].time * 1000).toISOString().slice(0, 10) : null,
+      lastClosedDailyDate: strategy.technical.evaluatedBarTime === null ? null : new Date(strategy.technical.evaluatedBarTime * 1000).toISOString().slice(0, 10) },
     candlesDaily: daily, candlesIntraday: intraday, sources,
   };
 }

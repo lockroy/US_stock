@@ -1,4 +1,5 @@
 import { emaSeries, rollingVolumeWeightedPrice, validateCandles } from "../indicators/indicators";
+import { marketSession, nyClock } from "../market/calendar";
 import type {
   IndicatorSnapshot,
   ResearchMemo,
@@ -43,17 +44,13 @@ export function buildMemo(ind: IndicatorSnapshot, candles: Candle[]): ResearchMe
   return { trend, keyLevels, momentum, volatility, invalidation };
 }
 
-// Nasdaq 日線的日期是 UTC 午夜標籤；美東時間 16:00 前不確認當日訊號。
-// 提早收市日也保守等到 16:00，不推測交易日曆或供應商是否完成最後更新。
+// Nasdaq 日期是 UTC 午夜標籤。參考日曆涵蓋範圍內依排定收市時間確認。
+// 範圍外僅保留舊有歷史研究邏輯；當前策略另以日曆範圍檢查暫停入場。
 export function closedDailyBar(time: number, asOf: Date): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", hourCycle: "h23",
-  }).formatToParts(asOf);
-  const part = (type: string) => parts.find(p => p.type === type)!.value;
-  const today = `${part("year")}-${part("month")}-${part("day")}`;
   const day = new Date(time * 1000).toISOString().slice(0, 10);
-  return day < today || (day === today && Number(part("hour")) >= 16);
+  const now = nyClock(asOf), session = marketSession(day);
+  if (session.kind === "closed") return false;
+  return day < now.day || (day === now.day && now.minute >= (session.closeMinute ?? 16 * 60));
 }
 
 // ---- 日線買點：所有條件只使用訊號日與之前的資料 ----

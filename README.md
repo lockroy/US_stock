@@ -185,13 +185,13 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.3`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.4`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.3」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.4」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
 
 
 ## V2.3：不適用與資料時效
@@ -203,3 +203,22 @@ PEG 增長非正數時由估值層標記 `not_applicable`，獨立顯示，不�
 本次沒有直接更改 Nasdaq 日期，也沒有宣稱找到一日差異的根因；上游時間標記與交易日曆仍需另行核實。
 
 即時標記優先核對 `primaryData.isRealTime`，相容外層舊欄位；兩者衝突時保持未知。2026-10-25 單次 Nasdaq 原始回應確認 AAPL 的 primaryData 為 false、來源日期仍為 Oct 22, 2026；沒有因為解析修正而更改供應商日期。
+
+
+## V2.4：交易日曆及資料時效透明度
+
+報告新增「資料時效與交易日曆」，並列來源報價日期、最新日線、最後已收盤研究日、日曆預期日期及供應商市場狀態原文。保留上游日期，不用讀取時間補作成交或市值更新時間。市值更新時間仍未提供，歷史 PEG 只作輸入快照研究；並未完成即時市值驗證。
+
+免費日曆使用 [exchange-calendars 4.13.2](https://pypi.org/project/exchange-calendars/4.13.2/) 的 XNYS 規則，涵蓋 2024–2028 年共 1255 個交易日，包含假期、提早收市及該版本已知特殊休市。這是第三方規則參考，並非即時交易所公告，亦不代表已獨立核對 Nasdaq／NYSE 官方日曆；兩個官方頁面在本次雲端檢查均被網路代理拒絕。尚未加入臨時停市公告來源，亦未建立逐隻股票的特殊交易安排驗證。
+
+日線時效改為對照預期最後已收盤交易日，取代四個曆日的粗略門檻。提早收市按美東參考收盤時間確認；假期 K 線不作已收盤日。參考範圍內的休市日 K 線會使當前入場參考暫停，不刪改來源資料。範圍外歷史資料可以保留研究，但當前時效超出日曆範圍會標示未知，不產生入場參考。參考收盤時間不保證資料供應商已更新。
+
+日曆 JSON 記錄版本、來源網址、套件 SHA256 及涵蓋範圍；Apache-2.0 授權副本位於 `lib/market/LICENSE.exchange-calendars`。Worker 執行環境直接使用已提交 JSON，毋須 Python 或額外付費服務。僅重新產生資料時，使用 Python 3.12 Linux 的獨立環境及固定 wheel 雜湊：
+
+```bash
+python3.12 -m venv /tmp/us-stock-calendar-tools
+/tmp/us-stock-calendar-tools/bin/pip install --only-binary=:all: --require-hashes -r scripts/calendar-requirements.txt
+/tmp/us-stock-calendar-tools/bin/python scripts/generate-market-calendar.py
+```
+
+更新年份、套件或已知特殊休市安排時，需重新產生並檢查資料、更新來源說明和相關測試；不會在瀏覽器請求時自動下載套件。尚未核實的報價／日線一日差異仍保留未知，不因加入日曆而宣稱已修復來源。

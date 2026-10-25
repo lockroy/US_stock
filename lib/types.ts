@@ -22,6 +22,7 @@ export interface Quote {
   asOf?: string | null; // 供應商原始時間文字
   fetchedAt?: number; // 本次資料讀取時間，不是成交時間
   isRealTime?: boolean | null;
+  marketStatus?: string | null;
 }
 
 export interface SearchResult {
@@ -229,6 +230,12 @@ export interface StockReport {
   financials?: Financials | null;
   valuation?: Valuation | null;
   marketCap?: MarketCapSnapshot | null;
+  timing?: {
+    calendar: import("./market/calendar").CalendarSnapshot;
+    quoteDate: string | null;
+    lastAvailableDailyDate: string | null;
+    lastClosedDailyDate: string | null;
+  };
   memo: ResearchMemo;
   rules: TradeRule[];
   plan: TradePlan | null;

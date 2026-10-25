@@ -1,4 +1,5 @@
 import type { Quote } from "../types";
+import { marketSession, nyClock } from "../market/calendar";
 
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const validDay = (label: string): string | null => {
@@ -7,9 +8,7 @@ const validDay = (label: string): string | null => {
 };
 
 export function newYorkDay(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
-  const part = (name: string) => parts.find(p => p.type === name)!.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
+  return nyClock(date).day;
 }
 
 // 只比較來源日期標籤，不猜測原文的時區，也不以 fetchedAt 當成交時間。
@@ -31,11 +30,13 @@ export function checkQuoteDate(quote: Quote, lastDailyTime: number, asOf: Date) 
   const dailyDate = new Date(lastDailyTime * 1000).toISOString().slice(0, 10);
   const today = newYorkDay(asOf);
   const timestampFuture = typeof quote.timestamp === "number" && quote.timestamp > asOf.getTime() / 1000;
-  const pass = quoteDate !== null && quoteDate >= dailyDate && quoteDate <= today && !timestampFuture;
+  const quoteSession = quoteDate ? marketSession(quoteDate) : null;
+  const pass = quoteDate !== null && quoteDate >= dailyDate && quoteDate <= today && !timestampFuture
+    && quoteSession?.closeMinute != null;
   return {
     name: "報價／日線日期", pass: pass ? true : null,
     note: quoteDate === null ? `報價日期未能核對；最後已收盤日線 ${dailyDate}。不以讀取時間補作成交時間，暫停當前入場參考價。`
-      : !pass ? `報價日期 ${quoteDate}，最後已收盤日線 ${dailyDate}，核對日期 ${today}；日期未對齊或在未來，原因尚未核實，不自行改日期，暫停當前入場參考價。`
+      : !pass ? `報價日期 ${quoteDate}，最後已收盤日線 ${dailyDate}，核對日期 ${today}；日期未對齊、在未來、非參考交易日或超出日曆範圍，原因尚未核實，不自行改日期，暫停當前入場參考價。`
       : `來源報價日期 ${quoteDate}，最後已收盤日線 ${dailyDate}；日期標籤符合要求，但不代表已核實即時性或成交時區。`,
   };
 }

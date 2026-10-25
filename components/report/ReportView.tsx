@@ -178,6 +178,18 @@ function ReportView({ symbol }: { symbol: string }) {
         )}
       </Block>
 
+      {r.timing && <aside className="card p-4 mb-4 text-sm" data-testid="data-timing">
+        <h2 className="font-semibold mb-2">資料時效與交易日曆</h2>
+        <div className="space-y-1 text-xs text-muted">
+          <p>核對日期（美東）：{r.timing.calendar.day}；今日參考安排：{r.timing.calendar.session === "closed" ? "休市" : r.timing.calendar.session === "early_close" ? "提早收市" : r.timing.calendar.session === "regular" ? "正常交易日" : "超出參考範圍"}{r.timing.calendar.close ? `，預定 ${r.timing.calendar.close} 收市` : ""}。</p>
+          <p>日曆預期最新已收盤日：{r.timing.calendar.expectedLastClosedDay ?? "未知"}</p>
+          <p>來源報價日期：{r.timing.quoteDate ?? "未知"}；最新日線日期：{r.timing.lastAvailableDailyDate ?? "未知"}；已收盤研究日：{r.timing.lastClosedDailyDate ?? "未知"}</p>
+          <p>供應商市場狀態原文：{r.quote.marketStatus ?? "未知"}；日期差異未核實時，不產生當前入場參考價。</p>
+          <p>市值更新時間仍未知；本次讀取時間及報價日期均不能代替市值更新時間，PEG 維持快照研究用途。</p>
+          <p>日曆來源：<a href={r.timing.calendar.url} target="_blank" rel="noopener noreferrer" className="text-accent">{r.timing.calendar.name} {r.timing.calendar.version}</a>；涵蓋 {r.timing.calendar.start} 至 {r.timing.calendar.end}。</p>
+          <p className="text-warn">{r.timing.calendar.verification}；臨時停市與交易所最新公告仍需核實。收市時間是參考安排，不保證供應商已完成更新。</p>
+        </div>
+      </aside>}
       <MissingDataSummary report={r} />
 
       {/* 2 評分總覽 */}

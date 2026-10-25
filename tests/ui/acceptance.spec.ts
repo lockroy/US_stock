@@ -5,6 +5,9 @@ import { audit, buildMemo, buildRules, findBuyPoints } from "../../lib/fable/fab
 import { computeIndicators } from "../../lib/indicators/indicators";
 import type { StockReport } from "../../lib/types";
 import { parseAnnualEps } from "../../lib/futu/sec";
+import calendar from "../../lib/market/xnys-sessions.json";
+import { calendarSnapshot } from "../../lib/market/calendar";
+import { quoteDay } from "../../lib/fable/timeliness";
 
 function refreshStrategyFixture(report: StockReport, inputs: Partial<ScoreInput> = {}) {
   const now = new Date("2026-10-16T20:01:00Z");
@@ -17,16 +20,19 @@ function refreshStrategyFixture(report: StockReport, inputs: Partial<ScoreInput>
   report.rules = buildRules(report.memo);
   report.buyPoints = findBuyPoints(report.candlesDaily, now);
   report.audit = audit(report.score, report.memo, report.plan);
+  report.timing = { calendar: calendarSnapshot(now), quoteDate: quoteDay(report.quote),
+    lastAvailableDailyDate: new Date(report.candlesDaily.at(-1)!.time * 1000).toISOString().slice(0, 10),
+    lastClosedDailyDate: report.strategy.technical.evaluatedBarTime === null ? null : new Date(report.strategy.technical.evaluatedBarTime * 1000).toISOString().slice(0, 10) };
 }
 
 async function strategyFixture(request: import("@playwright/test").APIRequestContext) {
   const response = await request.get("http://127.0.0.1:3050/api/report?symbol=AAPL");
   expect(response.ok()).toBe(true);
   const report: StockReport = await response.json();
-  const time = Date.parse("2026-10-16T00:00:00Z") / 1000;
-  report.candlesDaily = Array.from({ length: 200 }, (_, i) => {
+  const days = Object.keys(calendar.sessions).filter(d => d <= "2026-10-16").slice(-200);
+  report.candlesDaily = days.map((date, i) => {
     const close = 100 + i * 0.1;
-    return { time: time - (199 - i) * 86400, open: close, close, high: close + 0.2, low: close - 0.2, volume: 1000 };
+    return { time: Date.parse(`${date}T00:00:00Z`) / 1000, open: close, close, high: close + 0.2, low: close - 0.2, volume: 1000 };
   });
   report.candlesDaily[180].high = 150;
   Object.assign(report.candlesDaily[199], { open: 120.8, close: 120.8, high: 121, low: 120.6, volume: 1500 });
@@ -129,6 +135,10 @@ test("complete research inputs align scores, missing summary, stop and entry sta
   await page.goto("/stock/AAPL");
   await reportReady(page);
   await expect(page.getByTestId("dimension-基本面")).toContainText("基本面：100/100");
+  await expect(page.getByTestId("data-timing")).toContainText("正常交易日，預定 16:00 收市");
+  await expect(page.getByTestId("data-timing")).toContainText("日曆預期最新已收盤日：2026-10-16");
+  await expect(page.getByTestId("data-timing")).toContainText("市值更新時間仍未知");
+  await expect(page.getByTestId("data-timing")).toContainText("第三方規則參考，非即時交易所公告");
   await expect(page.getByTestId("dimension-估值")).toContainText("估值：100/100");
   await expect(page.getByTestId("missing-data-count")).toHaveText("未齊全資料：2 項");
   await expect(page.getByTestId("missing-data-list").locator("[data-missing-id]")).toHaveCount(2);

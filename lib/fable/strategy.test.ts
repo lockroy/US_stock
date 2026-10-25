@@ -8,13 +8,15 @@ import { findBuyPoints } from "./fable";
 import { buildReport } from "../futu/client";
 import * as nasdaq from "../futu/nasdaq";
 import { quoteDay } from "./timeliness";
+import calendar from "../market/xnys-sessions.json";
 
 const day = Date.parse("2026-10-16T00:00:00Z") / 1000;
 const asOf = new Date("2026-10-16T20:01:00Z");
 function history(): Candle[] {
-  const bars = Array.from({ length: 200 }, (_, i) => {
+  const days = Object.keys(calendar.sessions).filter(d => d <= "2026-10-16").slice(-200);
+  const bars = days.map((date, i) => {
     const close = 100 + i * 0.1;
-    return { time: day - (199 - i) * 86400, open: close, close, high: close + 0.2, low: close - 0.2, volume: 1000 };
+    return { time: Date.parse(`${date}T00:00:00Z`) / 1000, open: close, close, high: close + 0.2, low: close - 0.2, volume: 1000 };
   });
   // 過去壓力高於近期突破位，可檢查目標及 2:1 風險回報，不捏造已實現回報。
   bars[180].high = 150;
@@ -74,11 +76,22 @@ test("malformed price, stale history and invalid bars never produce entry refere
 
 test("an older historical buy marker cannot become the latest entry signal", () => {
   const bars = history();
-  bars.push({ ...bars[199], time: day + 86400, close: 120.7, open: 120.7, volume: 1000 });
-  const result = assessStrategy(score(input(bars)), bars, { ...quote, lastPrice: 120.7, asOf: "Oct 17, 2026" }, new Date("2026-10-17T20:01:00Z"));
-  assert.equal(findBuyPoints(bars, new Date("2026-10-17T20:01:00Z"))[0].time, day);
-  assert.equal(result.technical.evaluatedBarTime, day + 86400);
+  bars.push({ ...bars[199], time: day + 3 * 86400, close: 120.7, open: 120.7, volume: 1000 });
+  const result = assessStrategy(score(input(bars)), bars, { ...quote, lastPrice: 120.7, asOf: "Oct 19, 2026" }, new Date("2026-10-19T20:01:00Z"));
+  assert.equal(findBuyPoints(bars, new Date("2026-10-19T20:01:00Z"))[0].time, day);
+  assert.equal(result.technical.evaluatedBarTime, day + 3 * 86400);
   assert.equal(result.technical.status, "等待觸發");
+});
+
+test("a missing Friday session is stale on Sunday despite a three-day calendar gap", () => {
+  const result = assessStrategy(score(input()), history(), quote, new Date("2026-10-18T15:00:00Z"));
+  assert.equal(result.technical.checks.find(c => c.name === "日線時效")?.pass, true);
+  const missingFriday = history();
+  const dates = Object.keys(calendar.sessions).filter(d => d < "2026-10-16").slice(-200);
+  missingFriday.forEach((bar, i) => { bar.time = Date.parse(`${dates[i]}T00:00:00Z`) / 1000; });
+  const stale = assessStrategy(score(input(missingFriday)), missingFriday, quote, new Date("2026-10-18T15:00:00Z"));
+  assert.equal(stale.technical.checks.find(c => c.name === "日線時效")?.pass, null);
+  assert.equal(stale.technical.referencePlan, null);
 });
 
 test("an unclosed 200th bar cannot trigger a strategy even when it looks like a breakout", () => {

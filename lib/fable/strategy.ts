@@ -2,12 +2,11 @@ import { computeIndicators, validateCandles } from "../indicators/indicators";
 import type { Candle, Quote, ScoreResult, StrategyAssessment, StrategyCheck } from "../types";
 import { buildPlan, closedDailyBar } from "./fable";
 import { checkQuoteDate } from "./timeliness";
+import { lastCompletedSession, marketSession } from "../market/calendar";
 
 // 研究參數，沿用原本 65 分模型分界及 2:1 毛風險回報要求；尚未經回測校準。
 export const FUNDAMENTAL_THRESHOLD = 65;
 export const MIN_REWARD_RISK = 2;
-// 未接入交易所日曆；超過四個曆日就保守暫停當前訊號，不能當作即時行情。
-export const MAX_DAILY_AGE_DAYS = 4;
 
 export function assessStrategy(
   score: ScoreResult, candles: Candle[], quote: Quote, asOf = new Date(),
@@ -63,10 +62,13 @@ export function assessStrategy(
   technical.checks.push({ name: "已收盤日線", pass: closed.length >= 200 ? true : null, note: `${closed.length} 根；至少需要 200 根` });
   if (closed.length < 200) return finish();
   const latest = closed[closed.length - 1];
-  const age = (asOf.getTime() / 1000 - latest.time) / 86400;
-  const recent = age <= MAX_DAILY_AGE_DAYS;
-  technical.checks.push({ name: "日線時效", pass: recent ? true : null,
-    note: `最後日線 ${new Date(latest.time * 1000).toISOString().slice(0, 10)}；超過 ${MAX_DAILY_AGE_DAYS} 個曆日暫停訊號（未接交易日曆）` });
+  const latestDay = new Date(latest.time * 1000).toISOString().slice(0, 10);
+  const expected = lastCompletedSession(asOf);
+  technical.checks.push({ name: "日線時效", pass: expected !== null && latestDay === expected ? true : null,
+    note: `最後已收盤日線 ${latestDay}；第三方日曆預期 ${expected ?? "未知（超出參考範圍）"}。週末、假期與提早收市按參考日曆判斷，臨時停市公告未即時核實。` });
+  const invalidSessions = closed.filter(c => marketSession(new Date(c.time * 1000).toISOString().slice(0, 10)).kind === "closed");
+  technical.checks.push({ name: "日線交易日一致性", pass: invalidSessions.length === 0 ? true : null,
+    note: invalidSessions.length ? `${invalidSessions.length} 根日線日期在參考日曆為休市；不刪改來源，暫停當前入場。` : "參考範圍內沒有發現休市日 K 線；範圍外歷史日期未核實。" });
   technical.checks.push(checkQuoteDate(quote, latest.time, asOf));
   const ind = computeIndicators(closed);
   const averageVolume = closed.slice(-21, -1).reduce((sum, c) => sum + c.volume, 0) / 20;
