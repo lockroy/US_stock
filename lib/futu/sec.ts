@@ -1,11 +1,13 @@
 import type { EpsEvidence, EpsVersion } from "../types";
 import { normalizeTicker } from "./symbol";
+import { parseStatementFacts, type StatementFacts } from "./statement-evidence";
 
 export interface EpsResult {
   status: "ready" | "not_configured" | "unavailable" | "incomparable";
   growth: number | null;
   evidence?: EpsEvidence;
   versions?: EpsVersion[];
+  statementFacts?: StatementFacts;
   message: string;
 }
 
@@ -147,6 +149,8 @@ export async function fetchAnnualEps(symbol: string, periodEnd: string): Promise
     const cik = resolveSecCik(directory, symbol);
     if (!cik) return unknown("SEC 代號／CIK 或股份類別未能唯一核對，EPS 保持未知。");
     const facts = await request(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`, 3600);
-    return { ...parseAnnualEps(facts, cik, periodEnd), versions: parseEpsVersions(facts, cik, periodEnd) };
+    const result = parseAnnualEps(facts, cik, periodEnd);
+    return { ...result, versions: parseEpsVersions(facts, cik, periodEnd),
+      ...(result.evidence ? { statementFacts: parseStatementFacts(facts, result.evidence) } : {}) };
   } catch { return unknown("SEC 資料暫時無法讀取；EPS 保持未知，不影響其他已取得資料。", "unavailable"); }
 }

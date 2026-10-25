@@ -5,6 +5,8 @@ export function ComparabilityPanel({ report }: { report: StockReport }) {
   if (!evidence) return null;
   const { dividends, security } = evidence;
   const versions = report.financials?.epsHistory ?? [];
+  const checks = report.financials?.statementChecks;
+  const labels = { revenue: "營收", netIncome: "年度淨利", totalEquity: "股東權益", fcf: "簡化自由現金流" };
   return <aside className="card p-4 mb-4 text-sm" data-testid="data-comparability">
     <h2 className="font-semibold mb-2">歷史資料可比性</h2>
     <div className="space-y-3 text-xs text-muted">
@@ -31,8 +33,20 @@ export function ComparabilityPanel({ report }: { report: StockReport }) {
       <div data-testid="security-basis">
         <p className="font-medium text-text">股份類別與幣種</p>
         <p>供應商原始類別：{security.type ?? "未知"}；交易所：{security.exchange ?? "未知"}。</p>
-        <p>SEC EPS 單位：{security.epsCurrency ? "USD/shares（僅限已取得 EPS）" : "未知"}；其他財報幣種／金額縮放尚未獨立交叉核對，不能用 EPS 幣種推定整份財報。</p>
+        <p>SEC EPS 單位：{security.epsCurrency ? "USD/shares（僅限已取得 EPS）" : "未知"}；不能用 EPS 幣種推定整份財報，其他財報幣種／金額縮放按下列科目逐項核對。</p>
         <p>股份類別與 ADR／ADS 換算比率未完成獨立核對；供應商標示存託證券時，暫不直接套用發行人 EPS。IFRS 或其他幣種 EPS 不換算補缺。</p>
+      </div>
+      <div data-testid="statement-checks">
+        <p className="font-medium text-text">財報金額與單位交叉核對</p>
+        {checks ? <>
+          <p>同財年 {checks.periodEnd} · SEC 申報 {checks.filed} · {checks.accession}。<a href={checks.url} target="_blank" rel="noopener noreferrer" className="text-accent">SEC 原始科目來源</a></p>
+          <ul className="space-y-2 mt-1">{checks.checks.map(check => <li key={check.key} data-statement-key={check.key}>
+            <span className={check.status === "matched" ? "text-ok" : "text-warn"}>{labels[check.key]}：{check.status === "matched" ? "金額／USD 單位對齊" : check.status === "mismatch" ? "有差異，待核對" : "未取得可比資料"}</span>
+            <p>Nasdaq 原值 {check.providerThousands?.toLocaleString() ?? "未知"} × 1000；SEC {check.secUSD?.toLocaleString() ?? "未知"} USD；差額 {check.differenceUSD?.toLocaleString() ?? "未知"} USD。</p>
+            <details><summary className="cursor-pointer">科目與核對限制</summary><p className="break-words">{check.metrics.join("、") || "未取得科目"}。{check.note}</p></details>
+          </li>)}</ul>
+        </> : <p>未取得同一 SEC 申報的可比財務科目，幣種及金額縮放保持未核實，不以 EPS 單位代替。</p>}
+        <p>只核對列出科目，未涵蓋全部財報、債務、現金、股份或匯率口徑。有差異時暫停依賴該金額的估值，原始數字保留供查核；來源缺失不當零分。</p>
       </div>
       <p>以上驗證缺項另列於缺失總覽，不當零分；不代表已完成含成本或樣本外回測。</p>
     </div>

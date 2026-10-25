@@ -25,7 +25,10 @@ export function missingDataSummary(report: StockReport) {
   if (report.mode === "real" && report.comparability) {
     add("history.adjustment", "歷史可比性", "拆股／股息與日線調整", "可讀股息事件不證明公司行動完整，亦不證明 OHLCV 調整口徑；保留來源原值，未能驗證總回報", "未確認");
     add("history.financials", "歷史可比性", "完整財報歷史可用版本", "SEC EPS 申報版本另列；其他財務仍為最新快照，不可直接倒填到歷史回測", "未確認");
-    add("security.basis", "股份與幣種", "股份類別／ADR 比率及財報幣種口徑", "供應商原始類別不是獨立驗證；EPS 美元單位不證明其他財報幣種與金額縮放", "未確認");
+    const checks = report.financials?.statementChecks?.checks ?? [];
+    const matched = checks.filter(c => c.status === "matched").length;
+    const unresolved = checks.filter(c => c.status !== "matched").map(c => ({ revenue: "營收", netIncome: "年度淨利", totalEquity: "股東權益", fcf: "自由現金流" })[c.key]);
+    add("security.basis", "股份與幣種", "股份類別／ADR 比率及未核對財報口徑", `已對齊 ${matched} 個列出科目的 USD 金額；${unresolved.length ? `待核對科目：${unresolved.join("、")}。` : ""}股份類別、ADR 比率及其他未列出科目仍未驗證，詳見交叉核對表。`, "未確認");
     if (report.comparability.dividends.status === "unavailable") add("dividends", "公司行動", "現金股息事件", "來源未能提供可核對股息列，不代表沒有派息", "未取得");
   }
 

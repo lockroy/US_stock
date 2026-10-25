@@ -9,6 +9,7 @@ import calendar from "../../lib/market/xnys-sessions.json";
 import { calendarSnapshot } from "../../lib/market/calendar";
 import { quoteDay } from "../../lib/fable/timeliness";
 import { buildComparability, parseDividends, unavailableDividends } from "../../lib/futu/corporate-actions";
+import { parseStatementFacts, reconcileStatements } from "../../lib/futu/statement-evidence";
 
 function refreshStrategyFixture(report: StockReport, inputs: Partial<ScoreInput> = {}) {
   const now = new Date("2026-10-16T20:01:00Z");
@@ -169,7 +170,7 @@ test("historical comparability separates real event fields from unknown adjustme
   await expect(panel).toContainText("不代表日線已作除息調整");
   await expect(panel).toContainText("不能直接倒填到過去回測");
   await expect(panel).toContainText("American Depositary Shares");
-  await expect(panel).toContainText("其他財報幣種／金額縮放尚未獨立交叉核對");
+  await expect(panel).toContainText("其他財報幣種／金額縮放按下列科目逐項核對");
   for (const id of ["history.adjustment", "history.financials", "security.basis"]) await expect(page.locator(`[data-missing-id="${id}"]`)).toHaveCount(1);
   await noOverflow(page);
   report.comparability.dividends = unavailableDividends("AAPL");
@@ -177,6 +178,37 @@ test("historical comparability separates real event fields from unknown adjustme
   await expect(page.getByTestId("corporate-actions")).toContainText("不代表沒有派息");
   await expect(page.locator('[data-missing-id="dividends"]')).toHaveCount(1);
   expect(report.score.total).toBe(before);
+});
+
+test("statement reconciliation exposes matching units and conflicting amounts without hiding original inputs", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  const annual = { start: "2024-10-01", end: "2025-09-30", accn: "0000320193-25-000079", filed: "2025-10-31", form: "10-K", fp: "FY" };
+  const data = { cik: 320193, facts: { "us-gaap": {
+    EarningsPerShareDiluted: { units: { "USD/shares": [{ ...annual, val: 6 }, { ...annual, start: "2023-10-01", end: "2024-09-30", val: 5 }] } },
+    Revenues: { units: { USD: [{ ...annual, val: 200000 }] } }, NetIncomeLoss: { units: { USD: [{ ...annual, val: 30000 }] } },
+    StockholdersEquity: { units: { USD: [{ ...annual, start: undefined, val: 100000 }] } },
+    NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ ...annual, val: 20000 }] } },
+    PaymentsToAcquirePropertyPlantAndEquipment: { units: { USD: [{ ...annual, val: 4000 }] } },
+  } } };
+  const evidence = parseAnnualEps(data, "0000320193", "9/30/2025", new Date("2026-10-16T20:01:00Z")).evidence!;
+  report.financials = { revenueGrowth: 15, epsGrowth: 20, netIncomeGrowth: 15, grossMargin: 40, roe: 30, roic: 20, debtToEquity: 0.5, fcf: 16, periodEnd: "9/30/2025", epsEvidence: evidence,
+    statementChecks: reconcileStatements(parseStatementFacts(data, evidence), { revenue: 200, netIncome: 30, totalEquity: 100, fcf: 16 }) };
+  report.comparability = buildComparability(report.quote, report.financials, unavailableDividends("AAPL"));
+  refreshStrategyFixture(report, { financials: report.financials, valuation: { pe: 10, peg: 0.5, pb: 2, ps: null, evSales: null, fcfYield: 5 } });
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  const panel = page.getByTestId("statement-checks");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText(/金額／USD 單位對齊/)).toHaveCount(4);
+  await expect(panel.locator('[data-statement-key="netIncome"]')).toContainText("Nasdaq 原值 30 × 1000；SEC 30,000 USD；差額 0 USD");
+  await expect(panel).toContainText("未涵蓋全部財報、債務、現金、股份或匯率口徑");
+  await noOverflow(page);
+  const conflict = report.financials.statementChecks!.checks.find(c => c.key === "netIncome")!;
+  Object.assign(conflict, { status: "mismatch", secUSD: 40000, differenceUSD: -10000 });
+  refreshStrategyFixture(report, { financials: report.financials, valuation: { pe: null, peg: null, pb: 2, ps: null, evSales: null, fcfYield: 5 } });
+  await page.reload();
+  await expect(panel.locator('[data-statement-key="netIncome"]')).toContainText("有差異，待核對");
+  await expect(panel.locator('[data-statement-key="netIncome"]')).toContainText("Nasdaq 原值 30 × 1000；SEC 40,000 USD；差額 -10,000 USD");
 });
 
 test("partial scores keep technical opportunities separate from unknown fundamentals", async ({ page, request }, info) => {

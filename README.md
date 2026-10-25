@@ -185,13 +185,13 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.5`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.6`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.5」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.6」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
 
 
 ## V2.3：不適用與資料時效
@@ -233,3 +233,16 @@ python3.12 -m venv /tmp/us-stock-calendar-tools
 - **股份與幣種**：保留 Nasdaq `stockType`／`exchange` 原文。明確屬 ADR／ADS／Depositary 證券時，報告及獨立 financials／valuation 路徑均不直接套用發行人 EPS；其他財務仍保留。SEC 同 CIK 多 ticker 原有保守限制不變。EPS `USD/shares` 僅證明該 EPS 科目單位，不代表其他財報幣種、千元縮放或 ADR 比率已獨立核對；IFRS／非美元 EPS 仍不以猜測轉換補缺。
 
 現有 Nasdaq 財務／估值計算的千美元口徑仍須與原始申報逐科目交叉核對，供應商原始證券分類也不是已完成獨立股份類別驗證。股息讀取失敗不會使其他真實數據或已知項目評分消失。所有證據、限制及未接入項目需在正式網站驗收後再判定部署可用，不能用離線測試取代正式來源驗證。
+
+
+## V2.6：財報金額逐科目交叉核對
+
+SEC Company Facts 現在除 EPS 外，亦讀取同一公司、同一申報（accession／form／filed）及同一年度期間的 USD 科目，與 Nasdaq 營收、年度淨利、股東權益及簡化 FCF 原值×1000 對照。股東權益要求同財年結束日的時點科目；其他要求與 EPS 完全一致的年度起訖，季度、其他幣種、舊申報及衝突別名均不補用。FCF 使用同申報的營運現金流減資本支出絕對值，不宣稱是 SEC 直接披露的 FCF 科目。
+
+核對表保留雙方原值、USD 差額、科目名稱與申報來源，狀態區分對齊／有差異／未取得可比資料。容許最多 500 USD（Nasdaq 千元呈列單位的一半）的四捨五入差額，不自動更改縮放、不換匯、不挑選剛好相符的別名。AAPL 使用者提供的 SEC 與 Nasdaq 原始 JSON 四項差額均為零；正式來源仍須另外驗收。
+
+金額有差異不代表已判定哪個來源錯誤，可能是版本、定義或數值差異；依賴該金額的 P/E／PEG、P/B、P/S／EV/Sales 或 FCF 殖利率會保持未知。FCF 有明確衝突時不參與基本面評分；來源原數仍在核對表，不改為零，其餘因子照原有可用權重正規化。來源沒有可比科目則保持未核實，沒有宣稱其他原有估值因此全部獲驗證。
+
+此功能只核對列出科目的金額及 USD 單位，未核對全部債務、現金、股份類別、ADR 換算、匯率或完整歷史時點財報。ADR／多股份類別未能對齊 SEC 的情況仍保守保留未知。
+
+拆股來源另測 Nasdaq calendar：查詢 `date=2022-08-25` 卻返回 2026 年事件，指定期間未能對齊，因此不接入作為完整歷史拆股證據，也不根據該回應自動調整日線。Yahoo 與之前失敗的端點沒有重複重試；拆股、除息及成交量調整仍列待核實。

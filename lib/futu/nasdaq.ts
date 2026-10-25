@@ -287,7 +287,8 @@ export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsR
   if (!raw || !known(marketCap) || marketCap <= 0) return null;
   if (snapshot && snapshot.value !== marketCap) return null;
   const { revenue, netIncome, totalEquity, totalDebt, cash, fin } = raw;
-  const pe = known(netIncome) && netIncome > 0 ? marketCap / (netIncome * 1000) : null;
+  const conflict = (key: "revenue" | "netIncome" | "totalEquity" | "fcf") => fin.statementChecks?.checks.some(c => c.key === key && c.status === "mismatch") ?? false;
+  const pe = !conflict("netIncome") && known(netIncome) && netIncome > 0 ? marketCap / (netIncome * 1000) : null;
   const evidence = fin.epsEvidence;
   const aligned = !!evidence && !!fin.periodEnd && financialEnd(fin.periodEnd) === evidence.currentEnd;
   const growth = evidence && known(evidence.current) && known(evidence.previous) && evidence.previous > 0
@@ -300,18 +301,18 @@ export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsR
     : !aligned ? "Nasdaq 財年與 SEC EPS 財年不一致，未計算 PEG。"
     : !verifiedGrowth ? "EPS 增長不可用或與原始數值不一致，未計算 PEG。"
     : fin.epsGrowth! <= 0 ? "歷史 EPS 增長非正數，PEG 不適用。"
-    : pe === null ? "缺少正數年度淨利，未計算 PEG。"
+    : pe === null ? "缺少正數且未有交叉核對衝突的年度淨利，未計算 PEG。"
     : "僅按本次市值輸入與同財年 EPS 計算；市值更新時點尚未由供應商確認。";
-  const pb = known(totalEquity) && totalEquity > 0 ? marketCap / (totalEquity * 1000) : null;
-  const ps = known(revenue) && revenue > 0 ? marketCap / (revenue * 1000) : null;
-  const fcfYield = known(fin.fcf) ? fin.fcf * 1000 / marketCap * 100 : null;
+  const pb = !conflict("totalEquity") && known(totalEquity) && totalEquity > 0 ? marketCap / (totalEquity * 1000) : null;
+  const ps = !conflict("revenue") && known(revenue) && revenue > 0 ? marketCap / (revenue * 1000) : null;
+  const fcfYield = !conflict("fcf") && known(fin.fcf) ? fin.fcf * 1000 / marketCap * 100 : null;
   const ev = known(totalDebt) && known(cash) ? marketCap + totalDebt * 1000 - cash * 1000 : null;
-  const evSales = known(ev) && known(revenue) && revenue > 0 ? ev / (revenue * 1000) : null;
+  const evSales = !conflict("revenue") && known(ev) && known(revenue) && revenue > 0 ? ev / (revenue * 1000) : null;
   const finite = (value: number | null) => known(value) ? value : null;
   return { pe: finite(pe), peg: finite(peg), pb: finite(pb), fcfYield: finite(fcfYield), ps: finite(ps), evSales: finite(evSales),
     pegBasis: "歷史年度 PEG＝市值／年度淨利 ÷ SEC 年度攤薄 EPS 同比增長百分點；不是 TTM 或分析師預期 PEG；增長非正數時不適用。",
     pegMessage, pegApplicability: verifiedGrowth && fin.epsGrowth! <= 0 ? "not_applicable" : peg !== null && Number.isFinite(peg) ? "applicable" : "unknown",
-    financialPeriodEnd: fin.periodEnd, annualNetIncomeUSD: known(netIncome) ? finite(netIncome * 1000) : null,
+    financialPeriodEnd: fin.periodEnd, annualNetIncomeUSD: !conflict("netIncome") && known(netIncome) ? finite(netIncome * 1000) : null,
     ...(snapshot ? { marketCapSnapshot: snapshot } : {}) };
 }
 

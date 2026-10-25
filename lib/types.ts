@@ -47,6 +47,21 @@ export interface Financials {
   notes?: Record<string, string>;
   epsEvidence?: EpsEvidence;
   epsHistory?: EpsVersion[];
+  statementChecks?: StatementChecks;
+}
+
+export type StatementMetric = "revenue" | "netIncome" | "totalEquity" | "fcf";
+export interface StatementChecks {
+  source: "sec";
+  cik: string;
+  accession: string;
+  filed: string;
+  periodEnd: string;
+  url: string;
+  unit: "USD";
+  providerScale: 1000;
+  scope: "selected_fields_same_filing";
+  checks: { key: StatementMetric; status: "matched" | "mismatch" | "unavailable"; providerThousands: number | null; secUSD: number | null; differenceUSD: number | null; metrics: string[]; note: string }[];
 }
 
 export interface EpsVersion {

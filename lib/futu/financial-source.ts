@@ -1,6 +1,7 @@
 import type * as nasdaq from "./nasdaq";
 import { fetchAnnualEps, financialEnd, type EpsProvider } from "./sec";
 import { isDepositary } from "./corporate-actions";
+import { reconcileStatements } from "./statement-evidence";
 
 // 報告及獨立 financials／valuation 端點共用，不讓兩條路徑計出不同 EPS／PEG。
 export async function fetchFinancialsWithEps(symbol: string, provider: typeof nasdaq, epsProvider: EpsProvider = fetchAnnualEps, securityType?: string | null) {
@@ -14,6 +15,13 @@ export async function fetchFinancialsWithEps(symbol: string, provider: typeof na
   const fin = { ...raw.fin, notes: { ...raw.fin.notes } };
   if (result.versions) fin.epsHistory = result.versions;
   fin.notes.epsGrowth = `${raw.fin.notes?.epsGrowth ?? ""} ${result.message}`.trim();
+  if (result.statementFacts && financialEnd(raw.fin.periodEnd) === result.statementFacts.evidence.currentEnd) {
+    fin.statementChecks = reconcileStatements(result.statementFacts, { revenue: raw.revenue, netIncome: raw.netIncome, totalEquity: raw.totalEquity, fcf: raw.fin.fcf });
+    if (fin.statementChecks.checks.some(c => c.key === "fcf" && c.status === "mismatch")) {
+      fin.fcf = null;
+      fin.notes.fcf = "Nasdaq 與同申報 SEC 自由現金流口徑／金額有差異；原始輸入保留在交叉核對表，暫不採用矛盾值評分，亦不換成零。";
+    }
+  }
   if (result.status === "ready" && result.evidence) {
     const e = result.evidence;
     const expected = Number.isFinite(e.current) && Number.isFinite(e.previous) && e.previous > 0
