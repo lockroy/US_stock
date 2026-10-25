@@ -1,6 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "us-stock",
+  // 保留 Dashboard 管理的執行變數（例如 SEC_USER_AGENT），避免 Git 部署刪除。
+  "keep_vars": true,
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": [
