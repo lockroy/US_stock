@@ -195,12 +195,14 @@ function ReportView({ symbol }: { symbol: string }) {
         <p className="text-xs text-muted mt-1">計分依據：已知得分 {r.score.earnedPoints.toFixed(2)} ÷ 可用權重 {r.score.completeness.availablePoints} × 100；不同缺項的股票不宜只比較總分。</p>
         <div className="text-sm text-warn mt-2">
           評分資料覆蓋率 {r.score.completeness.percent}%（按評分權重計算；不代表資料真實度）
+          {r.score.completeness.excludedPoints > 0 && <p className="text-xs mt-1">不適用權重 {r.score.completeness.excludedPoints} 已排除；覆蓋率分母為適用權重 {r.score.completeness.applicablePoints}，不是把不適用項當作缺失。</p>}
           {r.score.completeness.missing.length > 0 && <div>缺失：{r.score.completeness.missing.join("；")}。缺失項退出分母，其餘已知項目按原有權重比例換算；此為部分評估，缺項可能改變結論。</div>}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           {r.score.dimensions.map(d => <div key={d.dimension} className="card p-3 text-sm" data-testid={`dimension-${d.dimension}`}>
             <div className="font-semibold">{d.dimension}：{d.score === null ? "未能評估" : `${d.score}/100`}</div>
-            <div className="text-muted text-xs mt-1">資料覆蓋 {d.coverage}%（可用權重 {d.availablePoints}/{d.max}）</div>
+            <div className="text-muted text-xs mt-1">資料覆蓋 {d.coverage}%（可用／適用權重 {d.availablePoints}/{d.applicablePoints}；原權重 {d.max}）</div>
+            {d.notApplicable.length > 0 && <div className="text-xs text-muted mt-1">不適用：{d.notApplicable.join("、")}（不當零分）</div>}
             {d.missing.length > 0 && <div className="text-xs text-warn mt-1">未確認：{d.missing.join("、")}</div>}
           </div>)}
         </div>
@@ -226,7 +228,7 @@ function ReportView({ symbol }: { symbol: string }) {
                 <td className="py-1 text-muted">{f.dimension}</td>
                 <td>{f.sub}{f.note && <p className="text-xs text-muted mt-1">{f.note}</p>}</td>
                 <td className="text-right">
-                  {(f.availableMax ?? (f.available === false ? 0 : f.max)) === 0 ? "未知" : `${+f.score.toFixed(2)} / ${+(f.availableMax ?? f.max).toFixed(2)}${f.available === false ? "（部分資料）" : ""}`}
+                  {f.applicability === "not_applicable" ? "不適用（不計分）" : (f.availableMax ?? (f.available === false ? 0 : f.max)) === 0 ? "未知" : `${+f.score.toFixed(2)} / ${+(f.availableMax ?? f.max).toFixed(2)}${f.available === false ? "（部分資料）" : ""}`}
                 </td>
               </tr>
             ))}

@@ -1,6 +1,7 @@
 import { computeIndicators, validateCandles } from "../indicators/indicators";
 import type { Candle, Quote, ScoreResult, StrategyAssessment, StrategyCheck } from "../types";
 import { buildPlan, closedDailyBar } from "./fable";
+import { checkQuoteDate } from "./timeliness";
 
 // 研究參數，沿用原本 65 分模型分界及 2:1 毛風險回報要求；尚未經回測校準。
 export const FUNDAMENTAL_THRESHOLD = 65;
@@ -19,16 +20,16 @@ export function assessStrategy(
   if (quote.isRealTime !== true) caveats.push("報價未確認為即時；實際下單前須重新核對成交價及風險回報。");
   const fundamentalChecks: StrategyCheck[] = ["基本面", "估值"].map(name => {
     const d = score.dimensions.find(d => d.dimension === name);
-    const complete = d && d.missing.length === 0 && d.availablePoints === d.max && d.score !== null;
+    const complete = d && d.missing.length === 0 && d.availablePoints === d.applicablePoints && d.score !== null;
     return {
       name: `${name}研究門檻`, pass: complete ? d.score! >= FUNDAMENTAL_THRESHOLD : null,
-      note: complete ? `${d.score}/100；研究門檻 ${FUNDAMENTAL_THRESHOLD}，不代表已出現買點`
+      note: complete ? `${d.score}/100；適用項目資料已齊${d.notApplicable.length ? `（${d.notApplicable.join("、")}不適用，已排除）` : ""}；研究門檻 ${FUNDAMENTAL_THRESHOLD}，不代表已出現買點`
         : `資料不足，未能完整判斷${name}；缺失：${d?.missing.join("、") || "未取得資料"}`,
     };
   });
   const fundamental: StrategyAssessment["fundamental"] = {
-    status: fundamentalChecks.some(c => c.pass === null) ? "資料不足"
-      : fundamentalChecks.some(c => c.pass === false) ? "條件不符合" : "等待觸發",
+    status: fundamentalChecks.some(c => c.pass === false) ? "條件不符合"
+      : fundamentalChecks.some(c => c.pass === null) ? "資料不足" : "等待觸發",
     checks: fundamentalChecks,
   };
   if (fundamental.status === "資料不足") caveats.push("基本面或估值未確認；技術機會不代表公司質素或估值已通過審查。");
@@ -66,6 +67,7 @@ export function assessStrategy(
   const recent = age <= MAX_DAILY_AGE_DAYS;
   technical.checks.push({ name: "日線時效", pass: recent ? true : null,
     note: `最後日線 ${new Date(latest.time * 1000).toISOString().slice(0, 10)}；超過 ${MAX_DAILY_AGE_DAYS} 個曆日暫停訊號（未接交易日曆）` });
+  technical.checks.push(checkQuoteDate(quote, latest.time, asOf));
   const ind = computeIndicators(closed);
   const averageVolume = closed.slice(-21, -1).reduce((sum, c) => sum + c.volume, 0) / 20;
   const hasVolume = averageVolume > 0 && latest.volume > 0 && ind.volumeWeightedPrice20 !== null;

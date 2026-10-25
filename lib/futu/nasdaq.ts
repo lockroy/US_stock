@@ -82,6 +82,10 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
     const d = body.data;
     if (toTicker(d.symbol ?? "") !== ticker) throw new QuoteLookupError("DATA_UNAVAILABLE");
     const p = d.primaryData || {};
+    const primaryRealtime = typeof p.isRealTime === "boolean" ? p.isRealTime : null;
+    const rootRealtime = typeof d.isRealTime === "boolean" ? d.isRealTime : null;
+    const isRealTime = primaryRealtime !== null && rootRealtime !== null && primaryRealtime !== rootRealtime
+      ? null : primaryRealtime ?? rootRealtime;
     const last = parseFinancialNumber(p.lastSalePrice);
     const volume = parseFinancialNumber(p.volume);
     if (last === null || !Number.isFinite(last) || last <= 0) throw new QuoteLookupError("DATA_UNAVAILABLE");
@@ -95,7 +99,7 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
       timestamp: null, // 供應商未提供已核對時區的 epoch，不以讀取時間冒充成交時間。
       asOf: typeof p.lastTradeTimestamp === "string" && p.lastTradeTimestamp.trim() && p.lastTradeTimestamp !== "N/A" ? p.lastTradeTimestamp : null,
       fetchedAt: Math.floor(Date.now() / 1000),
-      isRealTime: typeof d.isRealTime === "boolean" ? d.isRealTime : null,
+      isRealTime,
     };
   } catch (error) {
     if (error instanceof QuoteLookupError) throw error;
@@ -303,7 +307,8 @@ export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsR
   const finite = (value: number | null) => known(value) ? value : null;
   return { pe: finite(pe), peg: finite(peg), pb: finite(pb), fcfYield: finite(fcfYield), ps: finite(ps), evSales: finite(evSales),
     pegBasis: "歷史年度 PEG＝市值／年度淨利 ÷ SEC 年度攤薄 EPS 同比增長百分點；不是 TTM 或分析師預期 PEG；增長非正數時不適用。",
-    pegMessage, financialPeriodEnd: fin.periodEnd, annualNetIncomeUSD: known(netIncome) ? finite(netIncome * 1000) : null,
+    pegMessage, pegApplicability: verifiedGrowth && fin.epsGrowth! <= 0 ? "not_applicable" : peg !== null && Number.isFinite(peg) ? "applicable" : "unknown",
+    financialPeriodEnd: fin.periodEnd, annualNetIncomeUSD: known(netIncome) ? finite(netIncome * 1000) : null,
     ...(snapshot ? { marketCapSnapshot: snapshot } : {}) };
 }
 

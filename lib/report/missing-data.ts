@@ -11,8 +11,9 @@ export interface MissingDataItem {
 // 每個獨立輸入只計一次：例如評級同時供兩個評分代理使用，仍只算一項。
 export function missingDataSummary(report: StockReport) {
   const items = new Map<string, MissingDataItem>();
+  const notApplicable = new Map<string, MissingDataItem>();
   const add = (id: string, group: string, label: string, impact: string, status: MissingDataItem["status"] = "未取得") => {
-    items.set(id, { id, group, label, impact, status });
+    (status === "不適用" ? notApplicable : items).set(id, { id, group, label, impact, status });
   };
   const finite = (value: unknown) => typeof value === "number" && Number.isFinite(value);
   for (const [key, label] of [["change", "報價漲跌"], ["changePct", "漲跌百分比"], ["volume", "報價成交量"]] as const) {
@@ -20,6 +21,7 @@ export function missingDataSummary(report: StockReport) {
   }
   if (!report.quote.asOf?.trim()) add("quote.asOf", "報價", "供應商報價時間", "未能確認報價對應時間；讀取時間不能代替成交時間", "未確認");
   if (typeof report.quote.isRealTime !== "boolean") add("quote.isRealTime", "報價", "即時／延遲狀態", "下單前需核對即時成交價", "未確認");
+  if (report.marketCap?.value != null && report.marketCap.asOf === null) add("marketCap.asOf", "估值時效", "市值更新時間", "只知道本次讀取時間，無法確認供應商何時更新市值；歷史 PEG 不是即時估值", "未確認");
 
   for (const [key, label] of [
     ["revenueGrowth", "營收增長"], ["epsGrowth", "EPS 增長"], ["grossMargin", "毛利率"],
@@ -33,7 +35,9 @@ export function missingDataSummary(report: StockReport) {
 
   for (const factor of report.score.factors.filter(f => f.available === false)) {
     if (factor.dimension === "基本面") continue; // 上面已逐個列出，而非再計整組缺失
-    if (factor.dimension === "技術" && factor.sub === "20日成交量加權均價") {
+    if (factor.applicability === "not_applicable") {
+      add(`factor.${factor.dimension}.${factor.sub}`, factor.dimension, factor.sub, report.valuation?.pegMessage ?? "此項在目前資料條件下不適用，並非來源未接入", "不適用");
+    } else if (factor.dimension === "技術" && factor.sub === "20日成交量加權均價") {
       add("technical.volume", "技術資料可用性", "日線成交量／20日成交量加權均價", "量價資料不足，不能確認量價條件", "不可用");
     } else if (factor.dimension === "情緒/宏觀" && /護城河|評級/.test(factor.sub)) {
       add("ratings", "情緒／宏觀", "分析師評級", "評級及護城河代理未能評估；不直接封鎖技術策略");
@@ -53,6 +57,7 @@ export function missingDataSummary(report: StockReport) {
   for (const check of report.strategy.technical.checks.filter(c => c.pass === null)) {
     // 報價缺項已於報價組列出；其餘為日線／量價資料可用性問題。
     if (check.name === "入場參考報價") continue;
+    if (check.name === "報價／日線日期" && !report.quote.asOf?.trim() && report.quote.timestamp == null) continue;
     if (check.name === "成交量可用性") {
       add("technical.volume", "技術資料可用性", "日線成交量／20日成交量加權均價", check.note, "不可用");
       continue;
@@ -61,5 +66,5 @@ export function missingDataSummary(report: StockReport) {
   }
   const pendingValidation = report.audit.items.filter(item => item.pass === null
     && !["評分資料", "價格次序", "風險回報"].includes(item.name));
-  return { items: [...items.values()], pausedNews, pendingValidation };
+  return { items: [...items.values()], notApplicable: [...notApplicable.values()], pausedNews, pendingValidation };
 }

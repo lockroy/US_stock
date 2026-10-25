@@ -96,3 +96,18 @@ test("missing ROE cannot silently remove a valuation bonus or change P/B scoring
   assert.deepEqual(known.dimensions.find(d => d.dimension === "估值"), absent.dimensions.find(d => d.dimension === "估值"));
   assert.equal(absent.factors.find(f => f.sub === "P/B")?.score, 1);
 });
+
+test("inapplicable PEG is excluded from coverage and missing inputs, while unknown PEG remains missing", () => {
+  const valuation = { ...complete.valuation!, peg: null, pegApplicability: "not_applicable" as const };
+  const result = score({ ...complete, valuation });
+  assert.equal(result.total, 100);
+  assert.equal(result.completeness.percent, 100);
+  assert.equal(result.completeness.excludedPoints, 6);
+  assert.equal(result.completeness.applicablePoints, 94);
+  assert.equal(result.completeness.availablePoints, 94);
+  assert.deepEqual(result.completeness.missing, []);
+  assert.deepEqual(result.dimensions.find(d => d.dimension === "估值")?.notApplicable, ["PEG"]);
+  const unknown = score({ ...complete, valuation: { ...valuation, pegApplicability: "unknown" } });
+  assert.equal(unknown.completeness.percent, 94);
+  assert.ok(unknown.completeness.missing.some(s => s.includes("PEG")));
+});

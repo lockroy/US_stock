@@ -92,7 +92,7 @@ export function scoreValuation(v: Valuation): { score: number; factors: FactorSc
   const pegScore = valid(v.peg) ? (v.peg > 0 ? pegBand(v.peg) : 0) : 0;
   const pbScore = valid(v.pb) ? (v.pb > 0 ? pbBand(v.pb) : 0) : 0;
   return { score: peScore + pegScore + pbScore, factors: [
-    item("P/E", v.pe, 8, peScore), { ...item("PEG", v.peg, 6, pegScore), note: v.pegBasis }, item("P/B", v.pb, 6, pbScore),
+    item("P/E", v.pe, 8, peScore), { ...item("PEG", v.peg, 6, pegScore), note: v.pegBasis, applicability: v.pegApplicability }, item("P/B", v.pb, 6, pbScore),
   ] };
 }
 
@@ -146,13 +146,15 @@ export function tierOf(total: number): string {
 
 function summarize(dimension: string, factors: FactorScore[]): DimensionScore {
   const max = factors.reduce((sum, f) => sum + f.max, 0);
+  const applicablePoints = factors.reduce((sum, f) => sum + (f.applicability === "not_applicable" ? 0 : f.max), 0);
   const availablePoints = factors.reduce((sum, f) => sum + (f.availableMax ?? (f.available === false ? 0 : f.max)), 0);
   const earnedPoints = factors.reduce((sum, f) => sum + f.score, 0);
   return {
-    dimension, max, availablePoints: +availablePoints.toFixed(2), earnedPoints: +earnedPoints.toFixed(2),
+    dimension, max, applicablePoints, availablePoints: +availablePoints.toFixed(2), earnedPoints: +earnedPoints.toFixed(2),
     score: availablePoints > 0 ? Math.round(earnedPoints / availablePoints * 100) : null,
-    coverage: max > 0 ? +(availablePoints / max * 100).toFixed(2) : 0,
-    missing: factors.filter(f => f.available === false).map(f => f.missingInputs?.length ? f.missingInputs.join("、") : f.sub),
+    coverage: applicablePoints > 0 ? +(availablePoints / applicablePoints * 100).toFixed(2) : 0,
+    missing: factors.filter(f => f.available === false && f.applicability !== "not_applicable").map(f => f.missingInputs?.length ? f.missingInputs.join("、") : f.sub),
+    notApplicable: factors.filter(f => f.applicability === "not_applicable").map(f => f.sub),
   };
 }
 
@@ -183,7 +185,8 @@ export function score(input: ScoreInput): ScoreResult {
     earnedPoints: overall.earnedPoints,
     tier: overall.score === null ? "未能評估" : missing.length ? "已知項目評分（非完整總評）" : tierOf(overall.score),
     dimensions,
-    completeness: { percent: overall.coverage, availablePoints: overall.availablePoints, missing },
+    completeness: { percent: overall.coverage, availablePoints: overall.availablePoints, missing,
+      applicablePoints: overall.applicablePoints, excludedPoints: overall.max - overall.applicablePoints },
     factors, proxies: s.proxies,
   };
 }

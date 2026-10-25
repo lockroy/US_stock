@@ -7,6 +7,7 @@ import { assessStrategy } from "./strategy";
 import { findBuyPoints } from "./fable";
 import { buildReport } from "../futu/client";
 import * as nasdaq from "../futu/nasdaq";
+import { quoteDay } from "./timeliness";
 
 const day = Date.parse("2026-10-16T00:00:00Z") / 1000;
 const asOf = new Date("2026-10-16T20:01:00Z");
@@ -20,7 +21,7 @@ function history(): Candle[] {
   bars[199] = { ...bars[199], open: 120.8, close: 120.8, high: 121, low: 120.6, volume: 1500 };
   return bars;
 }
-const quote: Quote = { symbol: "US.AAPL", name: "fixture", lastPrice: 120.8, change: null, changePct: null, volume: null, timestamp: null };
+const quote: Quote = { symbol: "US.AAPL", name: "fixture", lastPrice: 120.8, change: null, changePct: null, volume: null, timestamp: null, asOf: "Oct 16, 2026" };
 function input(candles = history()): ScoreInput {
   return { financials: null, valuation: null, ratings: null, indicators: computeIndicators(candles), marketTrendUp: null, sectorStrong: null };
 }
@@ -74,7 +75,7 @@ test("malformed price, stale history and invalid bars never produce entry refere
 test("an older historical buy marker cannot become the latest entry signal", () => {
   const bars = history();
   bars.push({ ...bars[199], time: day + 86400, close: 120.7, open: 120.7, volume: 1000 });
-  const result = assessStrategy(score(input(bars)), bars, { ...quote, lastPrice: 120.7 }, new Date("2026-10-17T20:01:00Z"));
+  const result = assessStrategy(score(input(bars)), bars, { ...quote, lastPrice: 120.7, asOf: "Oct 17, 2026" }, new Date("2026-10-17T20:01:00Z"));
   assert.equal(findBuyPoints(bars, new Date("2026-10-17T20:01:00Z"))[0].time, day);
   assert.equal(result.technical.evaluatedBarTime, day + 86400);
   assert.equal(result.technical.status, "等待觸發");
@@ -140,4 +141,40 @@ test("report API assembly exposes no unconditional plan when necessary volume is
   assert.equal(report.audit.verdict, "未驗證");
   assert.deepEqual(report.buyPoints, []);
   assert.ok(Object.values(report.sources).every(s => s !== "mock"));
+});
+
+test("quote date extraction is strict and never uses fetchedAt or guesses a timezone", () => {
+  assert.equal(quoteDay({ ...quote, asOf: "Oct 16, 2026 4:01 PM ET" }), "2026-10-16");
+  assert.equal(quoteDay({ ...quote, asOf: "2026-10-16" }), "2026-10-16");
+  for (const asOf of ["Feb 30, 2026", "not a date", "16/10/2026", ""]) {
+    assert.equal(quoteDay({ ...quote, asOf, fetchedAt: Date.now() / 1000 }), null);
+  }
+  assert.equal(quoteDay({ ...quote, timestamp: Date.parse("2026-10-17T00:01:00Z") / 1000 }), "2026-10-16");
+  assert.equal(quoteDay({ ...quote, timestamp: 1e100 }), null);
+});
+
+test("older, future and unconfirmed quotes suppress current plans without changing historical signals or scores", () => {
+  const bars = history();
+  const known = score(input());
+  const before = findBuyPoints(bars, asOf);
+  assert.equal(before.length, 1);
+  for (const date of ["Oct 15, 2026", "Oct 17, 2026", ""]) {
+    const q = { ...quote, asOf: date };
+    const snapshot = { ...q };
+    const result = assessStrategy(known, bars, q, asOf);
+    assert.equal(result.technical.status, "資料不足");
+    assert.equal(result.technical.referencePlan, null);
+    assert.equal(result.technical.checks.find(c => c.name === "報價／日線日期")?.pass, null);
+    assert.deepEqual(q, snapshot);
+    assert.deepEqual(findBuyPoints(bars, asOf), before);
+    assert.deepEqual(score(input()), known);
+  }
+});
+
+test("known fundamental failure stays distinct from an unrelated missing valuation", () => {
+  const result = score({ ...input(), financials: { revenueGrowth: -10, epsGrowth: -20, grossMargin: 10, roe: 2, roic: 1, fcf: -1, debtToEquity: 2 } });
+  const assessment = assessStrategy(result, history(), quote, asOf);
+  assert.equal(assessment.fundamental.status, "條件不符合");
+  assert.equal(assessment.fundamental.checks[0].pass, false);
+  assert.equal(assessment.fundamental.checks[1].pass, null);
 });

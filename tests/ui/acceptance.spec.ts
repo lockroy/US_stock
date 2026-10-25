@@ -33,7 +33,7 @@ async function strategyFixture(request: import("@playwright/test").APIRequestCon
   report.mode = "real";
   report.candlesIntraday = [];
   report.financials = null;
-  Object.assign(report.quote, { lastPrice: 120.8, change: null, changePct: null, volume: null, timestamp: null, isRealTime: null });
+  Object.assign(report.quote, { lastPrice: 120.8, change: null, changePct: null, volume: null, timestamp: null, isRealTime: null, asOf: "Oct 16, 2026" });
   report.news = [];
   report.newsStatus = "disabled";
   report.newsMessage = "新聞功能暫停，未請求外部新聞來源。";
@@ -76,6 +76,38 @@ test("SEC EPS evidence and historical PEG cannot look like forecast analyst data
   await expect(valuation).toContainText("市值供應商更新時間：未知；供應商更新頻率：未知");
   await expect(valuation).toContainText("不是供應商更新時間");
   await expect(valuation).toContainText("歷史年度 PEG：1.25");
+  await noOverflow(page);
+});
+
+test("inapplicable PEG is separate from missing data and an older quote cannot yield a current entry", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  const parsed = parseAnnualEps({ cik: 320193, facts: { "us-gaap": { EarningsPerShareDiluted: { units: { "USD/shares": [
+    { start: "2024-10-01", end: "2025-09-30", val: 1, accn: "0000320193-25-000079", filed: "2025-11-01", form: "10-K", fp: "FY" },
+    { start: "2023-10-01", end: "2024-09-30", val: 2, accn: "0000320193-25-000079", filed: "2025-11-01", form: "10-K", fp: "FY" },
+  ] } } } } }, "0000320193", "9/30/2025", new Date("2026-10-24T00:00:00Z"));
+  report.financials = { revenueGrowth: -3, epsGrowth: parsed.growth, netIncomeGrowth: -40, grossMargin: 18,
+    roe: 4, roic: 3, fcf: 1, debtToEquity: 0.1, periodEnd: "9/30/2025", epsEvidence: parsed.evidence };
+  const valuation = { pe: 387, peg: null, pb: 17, ps: null, evSales: null, fcfYield: 1,
+    pegApplicability: "not_applicable" as const, pegMessage: "歷史 EPS 增長非正數，PEG 不適用。" };
+  const inputs = { financials: report.financials, valuation, marketTrendUp: true, sectorStrong: true };
+  refreshStrategyFixture(report, inputs);
+  const originalScore = report.score.total;
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  await expect(page.getByTestId("not-applicable-data")).toContainText("不適用資料：1 項");
+  await expect(page.getByTestId("not-applicable-data")).toContainText("PEG：歷史 EPS 增長非正數");
+  await expect(page.getByTestId("missing-data-list").locator('[data-missing-id="factor.估值.PEG"]')).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: "不適用（不計分）", exact: true })).toBeVisible();
+  await expect(page.getByTestId("dimension-估值")).toContainText("資料覆蓋 100%");
+  await expect(page.getByTestId("fundamental-strategy")).toContainText("基本面／估值策略：條件不符合");
+  report.quote.asOf = "Oct 15, 2026";
+  refreshStrategyFixture(report, inputs);
+  expect(report.score.total).toBe(originalScore);
+  await page.reload();
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：資料不足");
+  await expect(page.getByTestId("technical-strategy")).toContainText("報價日期 2026-10-15，最後已收盤日線 2026-10-16");
+  await expect(page.getByTestId("reference-plan")).toHaveCount(0);
+  await expect(page.getByTestId("fundamental-strategy")).toContainText("基本面／估值策略：條件不符合");
   await noOverflow(page);
 });
 
@@ -130,8 +162,8 @@ test("missing data summary counts unique inputs and separates paused news and un
   await page.route("**/api/report?**", route => route.fulfill({ json: report }));
   await page.goto("/stock/AAPL");
   const summary = page.getByTestId("missing-data-summary");
-  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：18 項");
-  await expect(summary.locator("[data-missing-id]")).toHaveCount(18);
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：17 項");
+  await expect(summary.locator("[data-missing-id]")).toHaveCount(17);
   await expect(summary.locator('[data-missing-id="ratings"]')).toHaveCount(1);
   await expect(summary.locator('[data-missing-id="financials.epsGrowth"]')).toContainText("EPS 增長");
   await expect(summary.locator('[data-missing-id="financials.fcf"]')).toContainText("自由現金流");
@@ -140,15 +172,15 @@ test("missing data summary counts unique inputs and separates paused news and un
 
   report.financials = { revenueGrowth: 0, epsGrowth: 0, grossMargin: 0, roe: 0, roic: 0, debtToEquity: 0, fcf: 0, netIncomeGrowth: 0 };
   await page.reload();
-  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：10 項");
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：9 項");
   await expect(summary.locator('[data-missing-id^="financials."]')).toHaveCount(0);
   report.newsStatus = "unavailable";
   await page.reload();
-  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：11 項");
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：10 項");
   await expect(summary.locator('[data-missing-id="news"]')).toContainText("新聞資料");
   report.newsStatus = "empty";
   await page.reload();
-  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：10 項");
+  await expect(summary.getByTestId("missing-data-count")).toHaveText("未齊全資料：9 項");
   await expect(summary.locator('[data-missing-id="news"]')).toHaveCount(0);
   await noOverflow(page);
 });

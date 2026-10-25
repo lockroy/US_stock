@@ -185,10 +185,21 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.2`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.3`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.2」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.3」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+
+
+## V2.3：不適用與資料時效
+
+PEG 增長非正數時由估值層標記 `not_applicable`，獨立顯示，不混入資料缺項，不當零分。已知項目分數及原始因子權重不變；覆蓋率改為可用權重／適用權重，不適用權重另列。例如原本 100 權重中 PEG 6 不適用、評級 13 未取得，覆蓋率為 81/94＝86.17%，不是準確率。估值的適用項目齊全時可以評估研究門檻；若有資料證明基本面或估值未達標，顯示條件不符合，不被其他未知項覆蓋。
+
+當前交易參考新增報價／日線日期檢查。已核對 epoch 使用美東日期，原始 asOf 僅辨認明確日期標籤；不猜測不明時區，不使用 fetchedAt 補作成交時間。報價日期未知、早於最後已收盤日線或在未來時，暫停當前入場參考價，保留評分及歷史日線研究。日期相符仍不代表分鐘級即時性已驗證。市值更新時間未知亦列入缺項總覽，歷史 PEG 保持為讀取輸入的研究值。
+
+本次沒有直接更改 Nasdaq 日期，也沒有宣稱找到一日差異的根因；上游時間標記與交易日曆仍需另行核實。
+
+即時標記優先核對 `primaryData.isRealTime`，相容外層舊欄位；兩者衝突時保持未知。2026-10-25 單次 Nasdaq 原始回應確認 AAPL 的 primaryData 為 false、來源日期仍為 Oct 22, 2026；沒有因為解析修正而更改供應商日期。

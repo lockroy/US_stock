@@ -13,6 +13,18 @@ async function withFetch(fetcher: typeof fetch, run: () => Promise<void>) {
   globalThis.fetch = fetcher;
   try { await run(); } finally { globalThis.fetch = previous; }
 }
+
+test("quote realtime status follows primary price metadata and preserves conflicting flags as unknown", async () => {
+  for (const [primary, root, expected] of [[false, undefined, false], [true, undefined, true], [false, true, null]] as const) {
+    await withFetch(async () => Response.json({ data: { symbol: "AAPL", isRealTime: root,
+      primaryData: { lastSalePrice: "$347.725", lastTradeTimestamp: "Oct 22, 2026", isRealTime: primary } } }), async () => {
+      const quote = await nasdaq.fetchVerifiedQuote("AAPL");
+      assert.equal(quote.isRealTime, expected);
+      assert.equal(quote.asOf, "Oct 22, 2026");
+      assert.equal(quote.timestamp, null);
+    });
+  }
+});
 const candleRow = { date: "01/02/2025", open: "$10", high: "$12", low: "$9", close: "$11", volume: "1,000" };
 
 test("missing quote fields stay null and fetch time cannot masquerade as trade time", async () => {

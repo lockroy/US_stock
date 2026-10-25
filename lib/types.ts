@@ -71,6 +71,7 @@ export interface Valuation {
   evSales: number | null; // fallback
   pegBasis?: string;
   pegMessage?: string;
+  pegApplicability?: "applicable" | "not_applicable" | "unknown";
   financialPeriodEnd?: string;
   annualNetIncomeUSD?: number | null;
   marketCapSnapshot?: MarketCapSnapshot;
@@ -129,6 +130,7 @@ export interface FactorScore {
   availableMax?: number;
   missingInputs?: string[];
   note?: string;
+  applicability?: "applicable" | "not_applicable" | "unknown";
 }
 
 export interface ScoreResult {
@@ -138,7 +140,7 @@ export interface ScoreResult {
   dimensions: DimensionScore[];
   factors: FactorScore[];
   proxies: string[]; // 代理指標說明
-  completeness: { percent: number; availablePoints: number; missing: string[] };
+  completeness: { percent: number; availablePoints: number; missing: string[]; excludedPoints: number; applicablePoints: number };
 }
 
 export interface DimensionScore {
@@ -149,6 +151,8 @@ export interface DimensionScore {
   max: number;
   coverage: number;
   missing: string[];
+  notApplicable: string[];
+  applicablePoints: number;
 }
 
 export type StrategyStatus = "符合入場條件" | "等待觸發" | "條件不符合" | "資料不足";
