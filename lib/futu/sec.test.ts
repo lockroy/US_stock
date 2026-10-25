@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fetchAnnualEps, parseAnnualEps, resolveSecCik } from "./sec";
+import { fetchAnnualEps, parseAnnualEps, parseEpsVersions, selectEpsVersion, resolveSecCik } from "./sec";
 import { fetchFinancialsWithEps } from "./financial-source";
 import { buildReport } from "./client";
 import { getStockData } from "./data";
@@ -77,6 +77,53 @@ test("a restatement uses both comparative values from the same latest filing", (
   assert.equal(result.evidence?.form, "10-K/A");
 });
 
+test("EPS history preserves original and amended pairs without using a same-day filing", () => {
+  const pair = facts().facts["us-gaap"].EarningsPerShareDiluted.units["USD/shares"];
+  const amended = pair.map(r => ({ ...r, val: r.end === "2025-09-30" ? 12 : 8, accn: "0000320193-26-000001", filed: "2026-01-01", form: "10-K/A" }));
+  const versions = parseEpsVersions(facts([...pair, ...amended]), cik, "9/30/2025", now);
+  assert.equal(versions.length, 2);
+  assert.equal(versions[0].growth, 20);
+  assert.equal(versions[1].growth, 50);
+  assert.equal(selectEpsVersion(versions, "2025-11-01"), null);
+  assert.equal(selectEpsVersion(versions, "2025-11-02")?.current, 6);
+  assert.equal(selectEpsVersion(versions, "2026-01-01")?.growth, 20);
+  assert.equal(selectEpsVersion(versions, "2026-01-02")?.growth, 50);
+  assert.equal(parseEpsVersions(facts([...pair, ...amended]), cik, "9/30/2025", new Date("2025-12-31T23:59:59Z")).length, 1);
+  assert.deepEqual(parseEpsVersions({ ...facts(), cik: 123 }, cik, "9/30/2025", now), []);
+});
+
+test("an incomplete or ambiguous newer EPS version cannot fall back to older history", () => {
+  const pair = facts().facts["us-gaap"].EarningsPerShareDiluted.units["USD/shares"];
+  for (const newer of [
+    [{ ...pair[0], val: NaN, accn: "0000320193-26-000001", filed: "2026-01-01", form: "10-K/A" }],
+    pair.flatMap(r => ["0000320193-26-000001", "0000320193-26-000002"].map(accn => ({ ...r, accn, filed: "2026-01-01", form: "10-K/A" }))),
+  ]) {
+    const versions = parseEpsVersions(facts([...pair, ...newer]), cik, "9/30/2025", now);
+    assert.equal(selectEpsVersion(versions, "2025-12-31")?.growth, 20);
+    assert.equal(selectEpsVersion(versions, "2026-01-02"), null);
+    assert.equal(versions.at(-1)?.status, "incomparable");
+  }
+});
+
+test("explicit depositary securities never borrow issuer EPS without a verified ratio", async () => {
+  let calls = 0;
+  for (const type of ["American Depositary Shares", "American Depository Receipt", "ADR", "ADS"]) {
+    const result = await fetchFinancialsWithEps("AAPL", provider, async () => { calls++; return parse(); }, type);
+    assert.equal(result?.fin.epsGrowth, null);
+    assert.equal(result?.fin.epsEvidence, undefined);
+    assert.equal(result?.fin.fcf, raw.fin.fcf);
+    assert.match(result!.fin.notes!.epsGrowth, /ADR／ADS/);
+  }
+  assert.equal(calls, 0);
+  const options = { realData: true, provider: { ...provider, fetchVerifiedQuote: async () => ({ ...mock.mockQuote("AAPL"), securityType: "American Depositary Shares" }) },
+    epsProvider: async () => { calls++; return parse(); },
+    newsProvider: async () => ({ data: [], source: "unknown" as const, status: "disabled" as const, message: "新聞暫停" }) };
+  assert.equal((await buildReport("AAPL", options)).financials?.epsEvidence, undefined);
+  assert.equal(((await getStockData("financials", "AAPL", "day", options)).data as { epsGrowth: number | null }).epsGrowth, null);
+  assert.equal(((await getStockData("valuation", "AAPL", "day", options)).data as { peg: number | null }).peg, null);
+  assert.equal(calls, 0);
+});
+
 test("missing contact identification makes no SEC request; failures remain unknown without leaking headers", async () => {
   const originalFetch = globalThis.fetch, originalUA = process.env.SEC_USER_AGENT;
   let calls = 0;
@@ -109,6 +156,7 @@ test("SEC fetch uses the configured identification and only the matched CIK endp
     };
     const result = await fetchAnnualEps("US.AAPL", "9/30/2025");
     assert.equal(result.growth, 20);
+    assert.equal(result.versions?.[0].usableFromDate, "2025-11-02");
     assert.deepEqual(urls, ["https://www.sec.gov/files/company_tickers.json", `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`]);
   } finally {
     globalThis.fetch = originalFetch;

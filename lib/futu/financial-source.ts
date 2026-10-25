@@ -1,14 +1,18 @@
 import type * as nasdaq from "./nasdaq";
 import { fetchAnnualEps, financialEnd, type EpsProvider } from "./sec";
+import { isDepositary } from "./corporate-actions";
 
 // 報告及獨立 financials／valuation 端點共用，不讓兩條路徑計出不同 EPS／PEG。
-export async function fetchFinancialsWithEps(symbol: string, provider: typeof nasdaq, epsProvider: EpsProvider = fetchAnnualEps) {
+export async function fetchFinancialsWithEps(symbol: string, provider: typeof nasdaq, epsProvider: EpsProvider = fetchAnnualEps, securityType?: string | null) {
   const raw = await provider.fetchFinancials(symbol);
   if (!raw?.fin.periodEnd) return raw;
+  if (isDepositary(securityType)) return { ...raw, fin: { ...raw.fin, epsGrowth: null, epsEvidence: undefined, epsHistory: undefined,
+    notes: { ...raw.fin.notes, epsGrowth: "供應商標示存託證券；ADR／ADS 換算比率與每股口徑未核實，不直接套用發行人 EPS。" } } };
   let result;
   try { result = await epsProvider(symbol, raw.fin.periodEnd); }
   catch { return raw; }
   const fin = { ...raw.fin, notes: { ...raw.fin.notes } };
+  if (result.versions) fin.epsHistory = result.versions;
   fin.notes.epsGrowth = `${raw.fin.notes?.epsGrowth ?? ""} ${result.message}`.trim();
   if (result.status === "ready" && result.evidence) {
     const e = result.evidence;
@@ -20,6 +24,7 @@ export async function fetchFinancialsWithEps(symbol: string, provider: typeof na
     if (financialEnd(raw.fin.periodEnd) !== result.evidence.currentEnd) {
       fin.epsGrowth = null;
       delete fin.epsEvidence;
+      delete fin.epsHistory;
       fin.notes.epsGrowth = `Nasdaq 財年 ${raw.fin.periodEnd} 與 SEC EPS 財年 ${result.evidence.currentEnd} 不一致，不自動合併相近日期。`;
     } else if (!matches) {
       fin.epsGrowth = null;

@@ -16,13 +16,15 @@ async function withFetch(fetcher: typeof fetch, run: () => Promise<void>) {
 
 test("quote realtime status follows primary price metadata and preserves conflicting flags as unknown", async () => {
   for (const [primary, root, expected] of [[false, undefined, false], [true, undefined, true], [false, true, null]] as const) {
-    await withFetch(async () => Response.json({ data: { symbol: "AAPL", marketStatus: "Closed", isRealTime: root,
+    await withFetch(async () => Response.json({ data: { symbol: "AAPL", stockType: "Common Stock", exchange: "NASDAQ-GS", marketStatus: "Closed", isRealTime: root,
       primaryData: { lastSalePrice: "$347.725", lastTradeTimestamp: "Oct 22, 2026", isRealTime: primary } } }), async () => {
       const quote = await nasdaq.fetchVerifiedQuote("AAPL");
       assert.equal(quote.isRealTime, expected);
       assert.equal(quote.asOf, "Oct 22, 2026");
       assert.equal(quote.timestamp, null);
       assert.equal(quote.marketStatus, "Closed");
+      assert.equal(quote.securityType, "Common Stock");
+      assert.equal(quote.exchange, "NASDAQ-GS");
     });
   }
 });

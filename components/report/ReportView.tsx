@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Chart } from "@/components/Chart";
 import { MissingDataSummary } from "./MissingDataSummary";
+import { ComparabilityPanel } from "./ComparabilityPanel";
 import type { StockReport, Financials, StrategyCheck } from "@/lib/types";
 import { normalizeTicker } from "@/lib/futu/symbol";
 
@@ -191,6 +192,7 @@ function ReportView({ symbol }: { symbol: string }) {
         </div>
       </aside>}
       <MissingDataSummary report={r} />
+      <ComparabilityPanel report={r} />
 
       {/* 2 評分總覽 */}
       <Block n={2} title="已知項目評分與資料覆蓋">

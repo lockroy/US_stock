@@ -8,6 +8,7 @@ import { parseAnnualEps } from "../../lib/futu/sec";
 import calendar from "../../lib/market/xnys-sessions.json";
 import { calendarSnapshot } from "../../lib/market/calendar";
 import { quoteDay } from "../../lib/fable/timeliness";
+import { buildComparability, parseDividends, unavailableDividends } from "../../lib/futu/corporate-actions";
 
 function refreshStrategyFixture(report: StockReport, inputs: Partial<ScoreInput> = {}) {
   const now = new Date("2026-10-16T20:01:00Z");
@@ -149,6 +150,33 @@ test("complete research inputs align scores, missing summary, stop and entry sta
   await expect(page.getByText(/報價未確認為即時；實際下單前須重新核對/)).toBeVisible();
   await noOverflow(page);
   await page.screenshot({ path: info.outputPath("complete-research-inputs.png"), fullPage: true });
+});
+
+test("historical comparability separates real event fields from unknown adjustments and historical availability", async ({ page, request }) => {
+  const report = await strategyFixture(request);
+  Object.assign(report.quote, { securityType: "American Depositary Shares", exchange: "NYSE" });
+  report.comparability = buildComparability(report.quote, null, parseDividends({ data: { dividends: { rows: [
+    { exOrEffDate: "8/10/2026", type: "Cash", amount: "$0.27", currency: "USD", paymentDate: "8/13/2026" },
+  ] } } }, "AAPL"));
+  const before = report.score.total;
+  await page.route("**/api/report?**", route => route.fulfill({ json: report }));
+  await page.goto("/stock/AAPL");
+  const panel = page.getByTestId("data-comparability");
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("可讀現金股息：1 筆");
+  await panel.getByText("查看最近五筆除淨記錄", { exact: true }).click();
+  await expect(panel).toContainText("除淨 2026-08-10 · 每股 0.27 USD");
+  await expect(panel).toContainText("不代表日線已作除息調整");
+  await expect(panel).toContainText("不能直接倒填到過去回測");
+  await expect(panel).toContainText("American Depositary Shares");
+  await expect(panel).toContainText("其他財報幣種／金額縮放尚未獨立交叉核對");
+  for (const id of ["history.adjustment", "history.financials", "security.basis"]) await expect(page.locator(`[data-missing-id="${id}"]`)).toHaveCount(1);
+  await noOverflow(page);
+  report.comparability.dividends = unavailableDividends("AAPL");
+  await page.reload();
+  await expect(page.getByTestId("corporate-actions")).toContainText("不代表沒有派息");
+  await expect(page.locator('[data-missing-id="dividends"]')).toHaveCount(1);
+  expect(report.score.total).toBe(before);
 });
 
 test("partial scores keep technical opportunities separate from unknown fundamentals", async ({ page, request }, info) => {

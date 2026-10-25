@@ -6,7 +6,7 @@ import type { Candle, Quote, Financials, Valuation, MarketCapSnapshot } from "..
 import { validateCandles } from "../indicators/indicators";
 import { financialEnd } from "./sec";
 
-const UA =
+export const NASDAQ_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 // 符號正規化：去 US. 前綴、大寫，Nasdaq 用純 ticker（AAPL / TSLA）
@@ -69,7 +69,7 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
   try {
     const res = await fetch(
       `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/info?assetclass=stocks`,
-      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(8000) }
+      { headers: { "User-Agent": NASDAQ_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(8000) }
     );
     if (res.status === 400 || res.status === 404) throw new QuoteLookupError("SYMBOL_NOT_FOUND");
     if (!res.ok) throw new QuoteLookupError("DATA_UNAVAILABLE");
@@ -101,6 +101,8 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
       fetchedAt: Math.floor(Date.now() / 1000),
       isRealTime,
       marketStatus: typeof d.marketStatus === "string" && d.marketStatus.length <= 64 ? d.marketStatus : null,
+      securityType: typeof d.stockType === "string" && d.stockType.trim() && d.stockType.length <= 160 ? d.stockType.trim() : null,
+      exchange: typeof d.exchange === "string" && d.exchange.trim() && d.exchange.length <= 64 ? d.exchange.trim() : null,
     };
   } catch (error) {
     if (error instanceof QuoteLookupError) throw error;
@@ -125,7 +127,7 @@ export async function fetchSummary(symbol: string): Promise<NasdaqSummary | null
   try {
     const res = await fetch(
       `https://api.nasdaq.com/api/quote/${ticker}/summary?assetclass=stocks`,
-      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(8000), cache: "no-store" }
+      { headers: { "User-Agent": NASDAQ_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(8000), cache: "no-store" }
     );
     if (!res.ok) return null;
     const s = (await res.json())?.data?.summaryData;
@@ -154,7 +156,7 @@ export async function fetchDaily(symbol: string, days = 400): Promise<Candle[] |
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const url = `https://api.nasdaq.com/api/quote/${ticker}/historical?assetclass=stocks&fromdate=${fmt(from)}&todate=${fmt(to)}&limit=${days + 5}`;
     const res = await fetch(url, {
-      headers: { "User-Agent": UA, Accept: "application/json" },
+      headers: { "User-Agent": NASDAQ_USER_AGENT, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
@@ -176,7 +178,7 @@ export async function fetchEtfDaily(etf: string, days = 130): Promise<Candle[] |
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const url = `https://api.nasdaq.com/api/quote/${etf}/historical?assetclass=etf&fromdate=${fmt(from)}&todate=${fmt(to)}&limit=${days + 5}`;
     const res = await fetch(url, {
-      headers: { "User-Agent": UA, Accept: "application/json" },
+      headers: { "User-Agent": NASDAQ_USER_AGENT, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
@@ -274,7 +276,7 @@ export function parseFinancialData(data: unknown): NasdaqFinancialsRaw | null {
 export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsRaw | null> {
   try {
     const res = await fetch(`https://api.nasdaq.com/api/company/${encodeURIComponent(toTicker(symbol))}/financials?frequency=1`,
-      { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(10000) });
+      { headers: { "User-Agent": NASDAQ_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(10000) });
     if (!res.ok) return null;
     return parseFinancialData((await res.json())?.data);
   } catch { return null; }

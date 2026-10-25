@@ -185,13 +185,13 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.4`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.5`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.4」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.5」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
 
 
 ## V2.3：不適用與資料時效
@@ -222,3 +222,14 @@ python3.12 -m venv /tmp/us-stock-calendar-tools
 ```
 
 更新年份、套件或已知特殊休市安排時，需重新產生並檢查資料、更新來源說明和相關測試；不會在瀏覽器請求時自動下載套件。尚未核實的報價／日線一日差異仍保留未知，不因加入日曆而宣稱已修復來源。
+
+
+## V2.5：公司行動、申報版本及證券口徑
+
+新增「歷史資料可比性」及缺項總覽，與評分覆蓋率分開；未知驗證狀態不當作零分，也不代表已完成歷史回測。
+
+- **現金股息**：按需讀取 Nasdaq `/api/quote/{ticker}/dividends?assetclass=stocks`，保留除淨日、每股金額、明示幣種、公告與支付日期。零值保留；日期／金額無效及非現金列另計未核對列。空表與讀取失敗分開，均不能推論沒有派息。未確認來源完整度、拆股事件與 OHLCV 的調整定義；不自動調整圖表，也不將價格回報稱為含股息總回報。2026-10-25 本地來源探測成功讀取 AAPL 股息；Yahoo 來源及 SEC submissions 端點被雲端代理拒絕後停止重試。
+- **SEC EPS 版本**：從現有 Company Facts 保留對應財年各申報的年度攤薄 EPS 配對及 accession／form／filed。每個版本只用同一申報的本期及上期；不把重述值倒填到原申報。`selectEpsVersion` 以決策日期選取已可用版本，缺申報接受時間時保守從申報翌日才可用；較新申報資料衝突或不可比時不退回舊版本。這只處理目前目標財年的 EPS 版本，並非全套跨財年、逐時點財務資料庫，也沒有接上回測引擎。
+- **股份與幣種**：保留 Nasdaq `stockType`／`exchange` 原文。明確屬 ADR／ADS／Depositary 證券時，報告及獨立 financials／valuation 路徑均不直接套用發行人 EPS；其他財務仍保留。SEC 同 CIK 多 ticker 原有保守限制不變。EPS `USD/shares` 僅證明該 EPS 科目單位，不代表其他財報幣種、千元縮放或 ADR 比率已獨立核對；IFRS／非美元 EPS 仍不以猜測轉換補缺。
+
+現有 Nasdaq 財務／估值計算的千美元口徑仍須與原始申報逐科目交叉核對，供應商原始證券分類也不是已完成獨立股份類別驗證。股息讀取失敗不會使其他真實數據或已知項目評分消失。所有證據、限制及未接入項目需在正式網站驗收後再判定部署可用，不能用離線測試取代正式來源驗證。

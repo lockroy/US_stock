@@ -25,13 +25,13 @@ export async function getStockData(kind: DataKind, symbol: string, rawRange = "d
     return { ...response, ...news };
   }
   if (kind === "financials") {
-    const data = real ? (await fetchFinancialsWithEps(context.symbol, provider, options.epsProvider))?.fin ?? null : mock.mockFinancials(context.symbol);
+    const data = real ? (await fetchFinancialsWithEps(context.symbol, provider, options.epsProvider, context.quote.securityType))?.fin ?? null : mock.mockFinancials(context.symbol);
     return { ...response, source: data ? real ? data.epsEvidence ? "derived" : "nasdaq" : "mock" : "unknown", data,
       ...(real && data?.epsEvidence ? { sources: { financials: "nasdaq" as const, epsGrowth: "sec" as const } } : {}) };
   }
   if (kind === "valuation") {
     if (!real) return { ...response, source: "mock", data: mock.mockValuation(context.symbol) };
-    const [summary, raw] = await Promise.all([provider.fetchSummary(context.symbol), fetchFinancialsWithEps(context.symbol, provider, options.epsProvider)]);
+    const [summary, raw] = await Promise.all([provider.fetchSummary(context.symbol), fetchFinancialsWithEps(context.symbol, provider, options.epsProvider, context.quote.securityType)]);
     const data = summary && raw ? provider.deriveValuation(summary.marketCap, raw, summary.marketCapSnapshot) : null;
     return { ...response, source: data ? "derived" : "unknown", data };
   }

@@ -14,6 +14,7 @@ import { fetchFinancialsWithEps } from "./financial-source";
 import type { EpsProvider } from "./sec";
 import { calendarSnapshot } from "../market/calendar";
 import { quoteDay } from "../fable/timeliness";
+import { fetchDividends, unavailableDividends, buildComparability, type DividendProvider } from "./corporate-actions";
 
 export class ReportError extends Error {
   constructor(public code: "INVALID_SYMBOL" | "INVALID_RANGE" | "SYMBOL_NOT_FOUND" | "DATA_UNAVAILABLE", message: string) {
@@ -38,6 +39,7 @@ export interface ReportOptions {
   newsProvider?: NewsProvider;
   directorySearch?: typeof searchDirectory;
   epsProvider?: EpsProvider;
+  dividendProvider?: DividendProvider;
 }
 
 // 所有股票資料入口共用模式、代號與存在性驗證。
@@ -68,13 +70,17 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   let newsResult: NewsResult | undefined;
   let marketTrendUp: boolean | null = null;
   let sectorStrong: boolean | null = null;
+  let dividends;
 
   if (real) {
     quote = verifiedQuote;
-    const [candles, summary, finRaw, spyTrend, fetchedNews] = await Promise.all([
+    const [candles, summary, finRaw, spyTrend, fetchedNews, fetchedDividends] = await Promise.all([
       provider.fetchDaily(symbol), provider.fetchSummary(symbol),
-      fetchFinancialsWithEps(symbol, provider, options.epsProvider), provider.fetchSpyTrend(),
+      fetchFinancialsWithEps(symbol, provider, options.epsProvider, quote.securityType), provider.fetchSpyTrend(),
       getNews(symbol, options.newsProvider),
+      // 測試替代 provider 時不意外呼叫真實網路；明確 provider 可注入公司行動資料。
+      (options.dividendProvider ?? (options.provider ? async () => unavailableDividends(symbol) : fetchDividends))(symbol)
+        .catch(() => unavailableDividends(symbol)),
     ]);
     if (!candles || candles.length < 200) {
       throw new ReportError("DATA_UNAVAILABLE", "有效日線不足 200 根，暫時無法產生報告");
@@ -86,6 +92,7 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
     ratings = null;
     newsResult = fetchedNews;
     news = newsResult.data;
+    dividends = fetchedDividends;
     marketTrendUp = spyTrend;
     sectorStrong = summary ? await provider.fetchSectorStrength(summary.sector) : null;
     sources.quote = sources.candlesDaily = "nasdaq";
@@ -122,6 +129,7 @@ export async function buildReport(rawSymbol: string, options: ReportOptions = {}
   sources.indicators = sources.scoring = "derived";
   return {
     quote, mode: real ? "real" : "demo", score: scoreResult, strategy, financials, valuation, marketCap,
+    ...(real && dividends ? { comparability: buildComparability(quote, financials, dividends) } : {}),
     memo, rules: buildRules(memo), plan, audit: audit(scoreResult, memo, plan),
     buyPoints: findBuyPoints(daily, assessedAt), news, newsStatus: newsResult?.status, newsMessage: newsResult?.message, newsFetchedAt: newsResult?.fetchedAt,
     timing: { calendar: calendarSnapshot(assessedAt), quoteDate: quoteDay(quote),

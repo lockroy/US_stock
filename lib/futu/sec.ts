@@ -1,11 +1,44 @@
-import type { EpsEvidence } from "../types";
+import type { EpsEvidence, EpsVersion } from "../types";
 import { normalizeTicker } from "./symbol";
 
 export interface EpsResult {
   status: "ready" | "not_configured" | "unavailable" | "incomparable";
   growth: number | null;
   evidence?: EpsEvidence;
+  versions?: EpsVersion[];
   message: string;
+}
+
+// 按申報日期重建同一財年的 EPS 版本；不把後來重述值倒填到較早決策日。
+export function parseEpsVersions(data: unknown, cik: string, periodEnd: string, asOf = new Date()): EpsVersion[] {
+  const root = object(data), gaap = object(object(root?.facts)?.["us-gaap"]);
+  const rows = object(object(gaap?.EarningsPerShareDiluted)?.units)?.["USD/shares"];
+  const target = financialEnd(periodEnd), today = asOf.toISOString().slice(0, 10);
+  if (!/^\d{10}$/.test(cik) || Number(cik) <= 0 || root?.cik !== Number(cik) || !Array.isArray(rows) || !target) return [];
+  const filings = new Map<string, Row>();
+  for (const item of rows) {
+    const r = object(item);
+    if (!r || r.end !== target || typeof r.filed !== "string" || day(r.filed) === null || r.filed > today
+      || typeof r.accn !== "string" || !/^\d{10}-\d{2}-\d{6}$/.test(r.accn)
+      || !["10-K", "10-K/A", "20-F", "20-F/A"].includes(String(r.form))) continue;
+    filings.set(`${r.filed}/${r.accn}`, r);
+  }
+  return [...filings.values()].sort((a, b) => String(a.filed).localeCompare(String(b.filed)) || String(a.accn).localeCompare(String(b.accn))).map(r => {
+    const parsed = parseAnnualEps(data, cik, periodEnd, new Date(`${r.filed}T23:59:59Z`));
+    const evidence = parsed.evidence?.accession === r.accn ? parsed.evidence : undefined;
+    return { filed: String(r.filed), accession: String(r.accn), form: String(r.form), status: evidence ? "ready" : "incomparable",
+      current: evidence?.current ?? null, previous: evidence?.previous ?? null, growth: evidence ? parsed.growth : null,
+      usableFromDate: new Date((day(r.filed)! + 1) * 86400000).toISOString().slice(0, 10) };
+  });
+}
+
+// 申報只有日期沒有接受時間，保守排除決策日當天的申報；最新版本不可用時不退回舊值。
+export function selectEpsVersion(versions: EpsVersion[], decisionDate: string): EpsVersion | null {
+  if (day(decisionDate) === null) return null;
+  const available = versions.filter(v => day(v.filed) !== null && v.filed < decisionDate && v.usableFromDate <= decisionDate);
+  const latest = available.map(v => v.filed).sort().at(-1);
+  const matches = available.filter(v => v.filed === latest);
+  return matches.length === 1 && matches[0].status === "ready" ? matches[0] : null;
 }
 export type EpsProvider = (symbol: string, periodEnd: string) => Promise<EpsResult>;
 type Row = Record<string, unknown>;
@@ -114,6 +147,6 @@ export async function fetchAnnualEps(symbol: string, periodEnd: string): Promise
     const cik = resolveSecCik(directory, symbol);
     if (!cik) return unknown("SEC 代號／CIK 或股份類別未能唯一核對，EPS 保持未知。");
     const facts = await request(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`, 3600);
-    return parseAnnualEps(facts, cik, periodEnd);
+    return { ...parseAnnualEps(facts, cik, periodEnd), versions: parseEpsVersions(facts, cik, periodEnd) };
   } catch { return unknown("SEC 資料暫時無法讀取；EPS 保持未知，不影響其他已取得資料。", "unavailable"); }
 }

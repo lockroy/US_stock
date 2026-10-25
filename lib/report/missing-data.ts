@@ -22,6 +22,12 @@ export function missingDataSummary(report: StockReport) {
   if (!report.quote.asOf?.trim()) add("quote.asOf", "報價", "供應商報價時間", "未能確認報價對應時間；讀取時間不能代替成交時間", "未確認");
   if (typeof report.quote.isRealTime !== "boolean") add("quote.isRealTime", "報價", "即時／延遲狀態", "下單前需核對即時成交價", "未確認");
   if (report.marketCap?.value != null && report.marketCap.asOf === null) add("marketCap.asOf", "估值時效", "市值更新時間", "只知道本次讀取時間，無法確認供應商何時更新市值；歷史 PEG 不是即時估值", "未確認");
+  if (report.mode === "real" && report.comparability) {
+    add("history.adjustment", "歷史可比性", "拆股／股息與日線調整", "可讀股息事件不證明公司行動完整，亦不證明 OHLCV 調整口徑；保留來源原值，未能驗證總回報", "未確認");
+    add("history.financials", "歷史可比性", "完整財報歷史可用版本", "SEC EPS 申報版本另列；其他財務仍為最新快照，不可直接倒填到歷史回測", "未確認");
+    add("security.basis", "股份與幣種", "股份類別／ADR 比率及財報幣種口徑", "供應商原始類別不是獨立驗證；EPS 美元單位不證明其他財報幣種與金額縮放", "未確認");
+    if (report.comparability.dividends.status === "unavailable") add("dividends", "公司行動", "現金股息事件", "來源未能提供可核對股息列，不代表沒有派息", "未取得");
+  }
 
   for (const [key, label] of [
     ["revenueGrowth", "營收增長"], ["epsGrowth", "EPS 增長"], ["grossMargin", "毛利率"],

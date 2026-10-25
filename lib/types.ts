@@ -23,6 +23,8 @@ export interface Quote {
   fetchedAt?: number; // 本次資料讀取時間，不是成交時間
   isRealTime?: boolean | null;
   marketStatus?: string | null;
+  securityType?: string | null; // 供應商原文，不能單憑此欄核實 ADR 比率
+  exchange?: string | null;
 }
 
 export interface SearchResult {
@@ -44,6 +46,43 @@ export interface Financials {
   periodEnd?: string;
   notes?: Record<string, string>;
   epsEvidence?: EpsEvidence;
+  epsHistory?: EpsVersion[];
+}
+
+export interface EpsVersion {
+  filed: string;
+  accession: string;
+  form: string;
+  status: "ready" | "incomparable";
+  current: number | null;
+  previous: number | null;
+  growth: number | null;
+  usableFromDate: string; // 缺接受時間，保守自申報日翌日開始；不是完整時點財務庫
+}
+
+export interface DividendEvidence {
+  status: "available" | "none_reported" | "unavailable";
+  source: "nasdaq";
+  url: string;
+  fetchedAt: number;
+  events: { exDate: string; amount: number; currency: string | null; paymentDate: string | null; declarationDate: string | null }[];
+  rejectedRows: number;
+  completeness: "unknown";
+  message: string;
+}
+
+export interface ComparabilityEvidence {
+  dividends: DividendEvidence;
+  priceAdjustment: "unverified";
+  financialHistory: "latest_snapshot_only";
+  security: {
+    type: string | null;
+    exchange: string | null;
+    epsCurrency: "USD" | null;
+    statementCurrency: null;
+    adrRatio: null;
+    shareClassVerified: false;
+  };
 }
 
 export interface EpsEvidence {
@@ -223,6 +262,7 @@ export type DataSource = "nasdaq" | "sec" | "finnhub" | "google_news" | "mock" |
 
 // 完整報告
 export interface StockReport {
+  comparability?: ComparabilityEvidence;
   quote: Quote;
   mode: "real" | "demo";
   score: ScoreResult;
