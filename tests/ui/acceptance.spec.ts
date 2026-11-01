@@ -187,19 +187,22 @@ test("statement reconciliation exposes matching units and conflicting amounts wi
     EarningsPerShareDiluted: { units: { "USD/shares": [{ ...annual, val: 6 }, { ...annual, start: "2023-10-01", end: "2024-09-30", val: 5 }] } },
     Revenues: { units: { USD: [{ ...annual, val: 200000 }] } }, NetIncomeLoss: { units: { USD: [{ ...annual, val: 30000 }] } },
     StockholdersEquity: { units: { USD: [{ ...annual, start: undefined, val: 100000 }] } },
+    CashAndCashEquivalentsAtCarryingValue: { units: { USD: [{ ...annual, start: undefined, val: 5000 }] } },
+    ShortTermInvestments: { units: { USD: [{ ...annual, start: undefined, val: 3000 }] } },
+    LongTermDebtNoncurrent: { units: { USD: [{ ...annual, start: undefined, val: 40000 }] } },
     NetCashProvidedByUsedInOperatingActivities: { units: { USD: [{ ...annual, val: 20000 }] } },
     PaymentsToAcquirePropertyPlantAndEquipment: { units: { USD: [{ ...annual, val: 4000 }] } },
   } } };
   const evidence = parseAnnualEps(data, "0000320193", "9/30/2025", new Date("2026-10-16T20:01:00Z")).evidence!;
   report.financials = { revenueGrowth: 15, epsGrowth: 20, netIncomeGrowth: 15, grossMargin: 40, roe: 30, roic: 20, debtToEquity: 0.5, fcf: 16, periodEnd: "9/30/2025", epsEvidence: evidence,
-    statementChecks: reconcileStatements(parseStatementFacts(data, evidence), { revenue: 200, netIncome: 30, totalEquity: 100, fcf: 16 }) };
+    statementChecks: reconcileStatements(parseStatementFacts(data, evidence), { revenue: 200, netIncome: 30, totalEquity: 100, fcf: 16, cashAndEquivalents: 5, shortTermInvestments: 3, longTermDebt: 40 }) };
   report.comparability = buildComparability(report.quote, report.financials, unavailableDividends("AAPL"));
   refreshStrategyFixture(report, { financials: report.financials, valuation: { pe: 10, peg: 0.5, pb: 2, ps: null, evSales: null, fcfYield: 5 } });
   await page.route("**/api/report?**", route => route.fulfill({ json: report }));
   await page.goto("/stock/AAPL");
   const panel = page.getByTestId("statement-checks");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText(/金額／USD 單位對齊/)).toHaveCount(4);
+  await expect(panel.getByText(/金額／USD 單位對齊/)).toHaveCount(7);
   await expect(panel.locator('[data-statement-key="netIncome"]')).toContainText("Nasdaq 原值 30 × 1000；SEC 30,000 USD；差額 0 USD");
   await expect(panel).toContainText("未涵蓋全部財報、債務、現金、股份或匯率口徑");
   await noOverflow(page);

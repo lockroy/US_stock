@@ -199,6 +199,7 @@ export interface NasdaqFinancialsRaw {
   totalEquity: number | null;
   totalDebt: number | null;
   cash: number | null;
+  balanceSheetComponents?: { cashAndEquivalents: number | null; shortTermInvestments: number | null; longTermDebt: number | null };
 }
 
 const known = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n);
@@ -236,8 +237,9 @@ export function parseFinancialData(data: unknown): NasdaqFinancialsRaw | null {
   const capex = rowVal(cf, "Capital Expenditures", "value2");
   const fcf = known(cfo) && known(capex) ? cfo - Math.abs(capex) : null;
   const equity = rowVal(bs, "Total Equity", "value2");
-  const totalDebt = addKnown(rowVal(bs, "Short-Term Debt / Current Portion of Long-Term Debt", "value2"), rowVal(bs, "Long-Term Debt", "value2"));
-  const cash = addKnown(rowVal(bs, "Cash and Cash Equivalents", "value2"), rowVal(bs, "Short-Term Investments", "value2"));
+  const balanceSheetComponents = { cashAndEquivalents: rowVal(bs, "Cash and Cash Equivalents", "value2"), shortTermInvestments: rowVal(bs, "Short-Term Investments", "value2"), longTermDebt: rowVal(bs, "Long-Term Debt", "value2") };
+  const totalDebt = addKnown(rowVal(bs, "Short-Term Debt / Current Portion of Long-Term Debt", "value2"), balanceSheetComponents.longTermDebt);
+  const cash = addKnown(balanceSheetComponents.cashAndEquivalents, balanceSheetComponents.shortTermInvestments);
   const grossProfit = rowVal(inc, "Gross Profit", "value2");
   const grossMargin = rowVal(ratios, "Gross Margin", "value2")
     ?? (known(grossProfit) && known(revenue) && revenue > 0 ? grossProfit / revenue * 100 : null);
@@ -270,7 +272,7 @@ export function parseFinancialData(data: unknown): NasdaqFinancialsRaw | null {
     if (!known(fin[key])) fin[key] = null;
   }
   if (![revenue, netIncome, equity, totalDebt, cash, fin.grossMargin, fin.roe, fcf].some(known)) return null;
-  return { fin, revenue, netIncome, totalEquity: equity, totalDebt, cash };
+  return { fin, revenue, netIncome, totalEquity: equity, totalDebt, cash, balanceSheetComponents };
 }
 
 export async function fetchFinancials(symbol: string): Promise<NasdaqFinancialsRaw | null> {
@@ -287,7 +289,7 @@ export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsR
   if (!raw || !known(marketCap) || marketCap <= 0) return null;
   if (snapshot && snapshot.value !== marketCap) return null;
   const { revenue, netIncome, totalEquity, totalDebt, cash, fin } = raw;
-  const conflict = (key: "revenue" | "netIncome" | "totalEquity" | "fcf") => fin.statementChecks?.checks.some(c => c.key === key && c.status === "mismatch") ?? false;
+  const conflict = (key: import("../types").StatementMetric) => fin.statementChecks?.checks.some(c => c.key === key && c.status === "mismatch") ?? false;
   const pe = !conflict("netIncome") && known(netIncome) && netIncome > 0 ? marketCap / (netIncome * 1000) : null;
   const evidence = fin.epsEvidence;
   const aligned = !!evidence && !!fin.periodEnd && financialEnd(fin.periodEnd) === evidence.currentEnd;
@@ -306,7 +308,8 @@ export function deriveValuation(marketCap: number | null, raw: NasdaqFinancialsR
   const pb = !conflict("totalEquity") && known(totalEquity) && totalEquity > 0 ? marketCap / (totalEquity * 1000) : null;
   const ps = !conflict("revenue") && known(revenue) && revenue > 0 ? marketCap / (revenue * 1000) : null;
   const fcfYield = !conflict("fcf") && known(fin.fcf) ? fin.fcf * 1000 / marketCap * 100 : null;
-  const ev = known(totalDebt) && known(cash) ? marketCap + totalDebt * 1000 - cash * 1000 : null;
+  const ev = !["cashAndEquivalents", "shortTermInvestments", "longTermDebt"].some(key => conflict(key as import("../types").StatementMetric))
+    && known(totalDebt) && known(cash) ? marketCap + totalDebt * 1000 - cash * 1000 : null;
   const evSales = !conflict("revenue") && known(ev) && known(revenue) && revenue > 0 ? ev / (revenue * 1000) : null;
   const finite = (value: number | null) => known(value) ? value : null;
   return { pe: finite(pe), peg: finite(peg), pb: finite(pb), fcfYield: finite(fcfYield), ps: finite(ps), evSales: finite(evSales),

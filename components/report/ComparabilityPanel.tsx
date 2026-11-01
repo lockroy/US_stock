@@ -6,7 +6,7 @@ export function ComparabilityPanel({ report }: { report: StockReport }) {
   const { dividends, security } = evidence;
   const versions = report.financials?.epsHistory ?? [];
   const checks = report.financials?.statementChecks;
-  const labels = { revenue: "營收", netIncome: "年度淨利", totalEquity: "股東權益", fcf: "簡化自由現金流" };
+  const labels = { revenue: "營收", netIncome: "年度淨利", totalEquity: "股東權益", fcf: "簡化自由現金流", cashAndEquivalents: "現金及現金等價物", shortTermInvestments: "短期投資", longTermDebt: "非流動長期債務" };
   return <aside className="card p-4 mb-4 text-sm" data-testid="data-comparability">
     <h2 className="font-semibold mb-2">歷史資料可比性</h2>
     <div className="space-y-3 text-xs text-muted">

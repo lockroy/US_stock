@@ -9,6 +9,9 @@ const TAGS = {
   totalEquity: ["StockholdersEquity"],
   operatingCashFlow: ["NetCashProvidedByUsedInOperatingActivities"],
   capitalExpenditures: ["PaymentsToAcquirePropertyPlantAndEquipment"],
+  cashAndEquivalents: ["CashAndCashEquivalentsAtCarryingValue"],
+  shortTermInvestments: ["ShortTermInvestments"],
+  longTermDebt: ["LongTermDebtNoncurrent"],
 };
 export interface StatementFacts {
   evidence: EpsEvidence;
@@ -28,7 +31,8 @@ export function parseStatementFacts(payload: unknown, evidence: EpsEvidence): St
         const r = object(item);
         if (!r || r.accn !== evidence.accession || r.filed !== evidence.filed || r.form !== evidence.form
           || r.end !== evidence.currentEnd || r.fp !== "FY") continue;
-        if (key === "totalEquity" ? r.start !== undefined : r.start !== evidence.currentStart) continue;
+        const instant = ["totalEquity", "cashAndEquivalents", "shortTermInvestments", "longTermDebt"].includes(key);
+        if (instant ? r.start !== undefined : r.start !== evidence.currentStart) continue;
         candidates.push({ value: r.val, tag });
       }
     }
@@ -42,10 +46,11 @@ export function parseStatementFacts(payload: unknown, evidence: EpsEvidence): St
   return { evidence, values };
 }
 
-export function reconcileStatements(facts: StatementFacts, provider: Record<StatementMetric, number | null>): StatementChecks {
+export function reconcileStatements(facts: StatementFacts, provider: Partial<Record<StatementMetric, number | null>>): StatementChecks {
   const { evidence, values } = facts;
   const sec = {
     revenue: values.revenue, netIncome: values.netIncome, totalEquity: values.totalEquity,
+    cashAndEquivalents: values.cashAndEquivalents, shortTermInvestments: values.shortTermInvestments, longTermDebt: values.longTermDebt,
     fcf: { value: values.operatingCashFlow.value !== null && values.capitalExpenditures.value !== null
       ? values.operatingCashFlow.value - Math.abs(values.capitalExpenditures.value) : null,
       metrics: [...values.operatingCashFlow.metrics, ...values.capitalExpenditures.metrics],

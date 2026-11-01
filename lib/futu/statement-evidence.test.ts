@@ -94,3 +94,32 @@ test("contradictory cash-flow totals remain traceable but cannot score as positi
   assert.equal(deriveValuation(1000000, enriched)?.fcfYield, null);
   assert.equal(raw.fin.fcf, 16);
 });
+
+test("cash, investments and noncurrent debt are reconciled separately without adding overlapping debt tags", async () => {
+  const data = { ...fixture(), facts: { "us-gaap": { ...fixture().facts["us-gaap"],
+    CashAndCashEquivalentsAtCarryingValue: { units: { USD: [row(5000, true)] } },
+    ShortTermInvestments: { units: { USD: [row(3000, true)] } },
+    LongTermDebtNoncurrent: { units: { USD: [row(40000, true)] } },
+    LongTermDebtCurrent: { units: { USD: [row(10000, true)] } },
+  } } };
+  const components = { cashAndEquivalents: 5, shortTermInvestments: 3, longTermDebt: 40 };
+  const expanded = { ...provider, fetchFinancials: async () => ({ ...raw, balanceSheetComponents: components }) };
+  const result = (await fetchFinancialsWithEps("AAPL", expanded, async () => ({ ...eps, statementFacts: parseStatementFacts(data, evidence) })))!;
+  assert.equal(result.fin.statementChecks?.checks.length, 7);
+  assert.ok(result.fin.statementChecks?.checks.every(c => c.status === "matched"));
+  assert.deepEqual(deriveValuation(1000000, result), deriveValuation(1000000, { ...result, fin: { ...result.fin, statementChecks: undefined } }));
+  const withoutNoncurrent = { ...data, facts: { "us-gaap": { ...data.facts["us-gaap"], LongTermDebtNoncurrent: { units: { USD: [] } } } } };
+  const check = reconcileStatements(parseStatementFacts(withoutNoncurrent, evidence), components);
+  assert.equal(check.checks.find(c => c.key === "longTermDebt")?.status, "unavailable");
+  assert.equal(check.checks.find(c => c.key === "longTermDebt")?.secUSD, null);
+  for (const key of ["CashAndCashEquivalentsAtCarryingValue", "LongTermDebtNoncurrent"] as const) {
+    const changed = { ...data, facts: { "us-gaap": { ...data.facts["us-gaap"], [key]: { units: { USD: [row(99000, true)] } } } } };
+    const conflict = (await fetchFinancialsWithEps("AAPL", expanded, async () => ({ ...eps, statementFacts: parseStatementFacts(changed, evidence) })))!;
+    assert.equal(deriveValuation(1000000, conflict)?.evSales, null);
+    assert.notEqual(deriveValuation(1000000, conflict)?.pe, null);
+    if (key === "LongTermDebtNoncurrent") {
+      assert.equal(conflict.fin.debtToEquity, null);
+      assert.equal(conflict.fin.roic, null);
+    }
+  }
+});

@@ -16,7 +16,12 @@ export async function fetchFinancialsWithEps(symbol: string, provider: typeof na
   if (result.versions) fin.epsHistory = result.versions;
   fin.notes.epsGrowth = `${raw.fin.notes?.epsGrowth ?? ""} ${result.message}`.trim();
   if (result.statementFacts && financialEnd(raw.fin.periodEnd) === result.statementFacts.evidence.currentEnd) {
-    fin.statementChecks = reconcileStatements(result.statementFacts, { revenue: raw.revenue, netIncome: raw.netIncome, totalEquity: raw.totalEquity, fcf: raw.fin.fcf });
+    fin.statementChecks = reconcileStatements(result.statementFacts, { revenue: raw.revenue, netIncome: raw.netIncome, totalEquity: raw.totalEquity, fcf: raw.fin.fcf, ...raw.balanceSheetComponents });
+    if (fin.statementChecks.checks.some(c => c.key === "longTermDebt" && c.status === "mismatch")) {
+      fin.debtToEquity = null;
+      fin.roic = null;
+      fin.notes.debtToEquity = fin.notes.roic = "Nasdaq 與同申報 SEC 非流動長期債務有差異；相依比率暫停採用，不以零債務代替，原始值見核對表。";
+    }
     if (fin.statementChecks.checks.some(c => c.key === "fcf" && c.status === "mismatch")) {
       fin.fcf = null;
       fin.notes.fcf = "Nasdaq 與同申報 SEC 自由現金流口徑／金額有差異；原始輸入保留在交叉核對表，暫不採用矛盾值評分，亦不換成零。";

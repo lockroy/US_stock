@@ -185,13 +185,13 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-10-25-real-data-v2.6`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-11-01-real-data-v2.7`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.6」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.7」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
 
 
 ## V2.3：不適用與資料時效
@@ -246,3 +246,12 @@ SEC Company Facts 現在除 EPS 外，亦讀取同一公司、同一申報（acc
 此功能只核對列出科目的金額及 USD 單位，未核對全部債務、現金、股份類別、ADR 換算、匯率或完整歷史時點財報。ADR／多股份類別未能對齊 SEC 的情況仍保守保留未知。
 
 拆股來源另測 Nasdaq calendar：查詢 `date=2022-08-25` 卻返回 2026 年事件，指定期間未能對齊，因此不接入作為完整歷史拆股證據，也不根據該回應自動調整日線。Yahoo 與之前失敗的端點沒有重複重試；拆股、除息及成交量調整仍列待核實。
+
+
+## V2.7：逐項處理時效、現金與非流動債務
+
+2026-11-01 正式網站重新核對 AAPL／MSFT／TSLA：來源報價、最後日線與參考日曆最新已收盤日均為 2026-10-30。之前一日差異在這三個當次樣本已不再出現；沒有改寫來源日期，也不代表所有股票或即時性已驗證。三個市值仍未提供更新時間，保持未知，沒有用讀取時間代替。
+
+金額核對新增現金及現金等價物、短期投資、非流動長期債務，分別只用同一申報同一財年結束日的 `CashAndCashEquivalentsAtCarryingValue`、`ShortTermInvestments`、`LongTermDebtNoncurrent` USD 時點科目。不以流動長期債務代替非流動債務、不疊加可能重複的負債科目、不將缺失視作零，不用其他投資或含租賃合計科目猜測匹配。
+
+有現金／投資／長期債務金額衝突時，EV/Sales 暫停；非流動長期債務衝突時，依賴該金額的負債權益比及簡化 ROIC 亦保持未知，其餘已知因子仍照原權重正規化。原始輸入保留於核對表。沒有可比科目與確認有差異分開顯示；新增三項核對不等於總債務、全部投資或 ADR 口徑已驗證。

@@ -50,7 +50,7 @@ export interface Financials {
   statementChecks?: StatementChecks;
 }
 
-export type StatementMetric = "revenue" | "netIncome" | "totalEquity" | "fcf";
+export type StatementMetric = "revenue" | "netIncome" | "totalEquity" | "fcf" | "cashAndEquivalents" | "shortTermInvestments" | "longTermDebt";
 export interface StatementChecks {
   source: "sec";
   cik: string;
