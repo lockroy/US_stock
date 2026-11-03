@@ -15,7 +15,7 @@ const TAGS = {
 };
 export interface StatementFacts {
   evidence: EpsEvidence;
-  values: Record<keyof typeof TAGS, { value: number | null; metrics: string[]; reason: string }>;
+  values: Record<keyof typeof TAGS, { value: number | null; metrics: string[]; reason: string; candidates?: StatementChecks["checks"][number]["candidates"] }>;
 }
 
 // 使用與年度 EPS 相同公司的同一申報；USD 是該財務科目的原始單位，並非從 EPS 推測。
@@ -43,12 +43,26 @@ export function parseStatementFacts(payload: unknown, evidence: EpsEvidence): St
       reason: !candidates.length ? "同一申報未取得符合期間的 USD 科目，不用其他幣種、季度或舊申報補缺。"
         : !valid ? "同申報科目／別名數值衝突或無效，不能挑選剛好相符的數字。" : "同申報、同期間 USD 科目。" };
   }
+  // 候選科目只供核對定義，不能取代原科目或因金額相等而自動採用。
+  const alternatives = { shortTermInvestments: ["AvailableForSaleSecuritiesCurrent", "MarketableSecuritiesCurrent"], longTermDebt: ["LongTermDebtAndFinanceLeaseObligationsNoncurrent", "LongTermDebtAndCapitalLeaseObligations"] };
+  if (root?.cik === Number(evidence.cik)) for (const key of Object.keys(alternatives) as (keyof typeof alternatives)[]) {
+    if (values[key].value !== null) continue;
+    values[key].candidates = alternatives[key].flatMap(metric => {
+      const fact = object(gaap?.[metric]), rows = object(fact?.units)?.USD;
+      if (!Array.isArray(rows)) return [];
+      const amounts = rows.map(object).filter(r => r && r.accn === evidence.accession && r.filed === evidence.filed && r.form === evidence.form
+        && r.end === evidence.currentEnd && r.start === undefined && r.fp === "FY" && finite(r.val)).map(r => r!.val as number);
+      if (!amounts.length) return [];
+      return [{ metric, label: typeof fact?.label === "string" ? fact.label : metric,
+        description: typeof fact?.description === "string" ? fact.description : "", valuesUSD: [...new Set(amounts)] }];
+    });
+  }
   return { evidence, values };
 }
 
 export function reconcileStatements(facts: StatementFacts, provider: Partial<Record<StatementMetric, number | null>>): StatementChecks {
   const { evidence, values } = facts;
-  const sec = {
+  const sec: Record<StatementMetric, StatementFacts["values"]["revenue"]> = {
     revenue: values.revenue, netIncome: values.netIncome, totalEquity: values.totalEquity,
     cashAndEquivalents: values.cashAndEquivalents, shortTermInvestments: values.shortTermInvestments, longTermDebt: values.longTermDebt,
     fcf: { value: values.operatingCashFlow.value !== null && values.capitalExpenditures.value !== null
@@ -65,6 +79,7 @@ export function reconcileStatements(facts: StatementFacts, provider: Partial<Rec
       const usable = difference !== null && Number.isFinite(difference);
       // Nasdaq 金額以千元呈列；容許最多半個呈列單位的四捨五入差，沒有自動更改縮放或匯率。
       return { key, providerThousands: raw, secUSD: amount, differenceUSD: usable ? difference : null,
+        ...(sec[key].candidates?.length ? { candidates: sec[key].candidates } : {}),
         status: !usable ? "unavailable" : Math.abs(difference) <= 500 ? "matched" : "mismatch", metrics: sec[key].metrics,
         note: `${sec[key].reason} Nasdaq 原值×1000 對照 SEC USD；容許差額 500 USD，只核對列出科目，不代表整份財報或股份口徑已驗證。` };
     }) };

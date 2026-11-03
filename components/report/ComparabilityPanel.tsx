@@ -43,7 +43,15 @@ export function ComparabilityPanel({ report }: { report: StockReport }) {
           <ul className="space-y-2 mt-1">{checks.checks.map(check => <li key={check.key} data-statement-key={check.key}>
             <span className={check.status === "matched" ? "text-ok" : "text-warn"}>{labels[check.key]}：{check.status === "matched" ? "金額／USD 單位對齊" : check.status === "mismatch" ? "有差異，待核對" : "未取得可比資料"}</span>
             <p>Nasdaq 原值 {check.providerThousands?.toLocaleString() ?? "未知"} × 1000；SEC {check.secUSD?.toLocaleString() ?? "未知"} USD；差額 {check.differenceUSD?.toLocaleString() ?? "未知"} USD。</p>
-            <details><summary className="cursor-pointer">科目與核對限制</summary><p className="break-words">{check.metrics.join("、") || "未取得科目"}。{check.note}</p></details>
+            <details><summary className="cursor-pointer">科目與核對限制</summary><p className="break-words">{check.metrics.join("、") || "未取得科目"}。{check.note}</p>
+              {!!check.candidates?.length && <div className="mt-2 text-warn" data-testid="unverified-candidates">
+                <p>候選科目：定義尚未確認，以下金額不參與核對或計分。</p>
+                {check.candidates.map(candidate => <div key={candidate.metric} className="mt-2 break-words">
+                  <p>{candidate.label} · {candidate.metric}</p><p>{candidate.description}</p>
+                  <p>同申報原值：{candidate.valuesUSD.map(value => value.toLocaleString()).join("、")} USD</p>
+                </div>)}
+              </div>}
+            </details>
           </li>)}</ul>
         </> : <p>未取得同一 SEC 申報的可比財務科目，幣種及金額縮放保持未核實，不以 EPS 單位代替。</p>}
         <p>只核對列出科目，未涵蓋全部財報、債務、現金、股份或匯率口徑。有差異時暫停依賴該金額的估值，原始數字保留供查核；來源缺失不當零分。</p>

@@ -61,7 +61,7 @@ export interface StatementChecks {
   unit: "USD";
   providerScale: 1000;
   scope: "selected_fields_same_filing";
-  checks: { key: StatementMetric; status: "matched" | "mismatch" | "unavailable"; providerThousands: number | null; secUSD: number | null; differenceUSD: number | null; metrics: string[]; note: string }[];
+  checks: { key: StatementMetric; status: "matched" | "mismatch" | "unavailable"; providerThousands: number | null; secUSD: number | null; differenceUSD: number | null; metrics: string[]; note: string; candidates?: { metric: string; label: string; description: string; valuesUSD: number[] }[] }[];
 }
 
 export interface EpsVersion {

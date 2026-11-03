@@ -185,13 +185,13 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-11-01-real-data-v2.7`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-11-03-real-data-v2.8`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.7」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.8」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
 
 
 ## V2.3：不適用與資料時效
@@ -255,3 +255,12 @@ SEC Company Facts 現在除 EPS 外，亦讀取同一公司、同一申報（acc
 金額核對新增現金及現金等價物、短期投資、非流動長期債務，分別只用同一申報同一財年結束日的 `CashAndCashEquivalentsAtCarryingValue`、`ShortTermInvestments`、`LongTermDebtNoncurrent` USD 時點科目。不以流動長期債務代替非流動債務、不疊加可能重複的負債科目、不將缺失視作零，不用其他投資或含租賃合計科目猜測匹配。
 
 有現金／投資／長期債務金額衝突時，EV/Sales 暫停；非流動長期債務衝突時，依賴該金額的負債權益比及簡化 ROIC 亦保持未知，其餘已知因子仍照原權重正規化。原始輸入保留於核對表。沒有可比科目與確認有差異分開顯示；新增三項核對不等於總債務、全部投資或 ADR 口徑已驗證。
+
+
+## V2.8：缺項分類及待核對科目證據
+
+缺失總覽分開顯示未取得、已有資料但待核實、目前不可用，並列出同一 SEC 申報已核對的科目數。不適用、暫停新聞及策略研究另列，數量不是扣分。
+
+當短期投資或非流動債務的主要 SEC 科目缺失時，保留同公司、同申報、同財年末、USD 候選科目的名稱、原始定義及全部不同金額供查核。候選科目不替代主科目、不計分、不因金額相等變成已核實。AAPL 與 TSLA 的對應定義仍須原始申報支持。
+
+整體未完成工作及驗收標準見 [修復計劃](REPAIR-PLAN.md)。

@@ -123,3 +123,25 @@ test("cash, investments and noncurrent debt are reconciled separately without ad
     }
   }
 });
+
+test("candidate definitions remain diagnostic even when their amounts match Nasdaq", () => {
+  const candidate = { label: "Available for sale", description: "Current available-for-sale securities only.", units: { USD: [row(3000, true), row(3000, true), row(4000, true)] } };
+  const data = { ...fixture(), facts: { "us-gaap": { ...fixture().facts["us-gaap"], AvailableForSaleSecuritiesCurrent: candidate } } };
+  const parsed = parseStatementFacts(data, evidence);
+  assert.equal(parsed.values.shortTermInvestments.value, null);
+  const check = reconcileStatements(parsed, { shortTermInvestments: 3 }).checks[0];
+  assert.equal(check.status, "unavailable");
+  assert.equal(check.secUSD, null);
+  assert.deepEqual(check.candidates, [{ metric: "AvailableForSaleSecuritiesCurrent", label: candidate.label, description: candidate.description, valuesUSD: [3000, 4000] }]);
+  assert.equal(parseStatementFacts({ ...data, cik: 123 }, evidence).values.shortTermInvestments.candidates, undefined);
+  const primary = { ...data, facts: { "us-gaap": { ...data.facts["us-gaap"], ShortTermInvestments: { units: { USD: [row(5000, true)] } } } } };
+  assert.equal(parseStatementFacts(primary, evidence).values.shortTermInvestments.candidates, undefined);
+});
+
+test("candidate evidence rejects other periods, filings, currencies and invalid values", () => {
+  const rejected = [row(3000), row(3000, true, { accn: "other" }), row(3000, true, { filed: "2025-11-01" }),
+    row(3000, true, { end: "2024-09-30" }), row(3000, true, { fp: "Q3" }), row(3000, true, { form: "10-Q" }), row(NaN, true)];
+  const data = { ...fixture(), facts: { "us-gaap": { ...fixture().facts["us-gaap"],
+    LongTermDebtAndFinanceLeaseObligationsNoncurrent: { units: { USD: rejected, EUR: [row(3000, true)] } } } } };
+  assert.deepEqual(parseStatementFacts(data, evidence).values.longTermDebt.candidates, []);
+});
