@@ -114,6 +114,12 @@ test("inapplicable PEG is separate from missing data and an older quote cannot y
   await page.reload();
   await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：資料不足");
   await expect(page.getByTestId("technical-strategy")).toContainText("報價日期 2026-10-15，最後已收盤日線 2026-10-16");
+  report.quote.asOf = "Oct 16, 2026 4:02 PM ET";
+  refreshStrategyFixture(report, inputs);
+  expect(report.score.total).toBe(originalScore);
+  await page.reload();
+  await expect(page.getByTestId("technical-strategy")).toContainText("技術策略：資料不足");
+  await expect(page.getByTestId("technical-strategy")).toContainText("在未來");
   await expect(page.getByTestId("reference-plan")).toHaveCount(0);
   await expect(page.getByTestId("fundamental-strategy")).toContainText("基本面／估值策略：條件不符合");
   await noOverflow(page);

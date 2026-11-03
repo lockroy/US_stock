@@ -124,3 +124,22 @@ test("paused news never contacts providers, in both report and news API paths", 
     if (previous === undefined) delete process.env.NEWS_ENABLED; else process.env.NEWS_ENABLED = previous;
   }
 });
+
+test("explicit ET quote times resolve winter and summer offsets without inventing date-only times", async () => {
+  for (const [text, iso] of [
+    ["Nov 3, 2026 4:39 AM ET", "2026-11-03T09:39:00Z"],
+    ["Jul 6, 2026 4:01 PM ET", "2026-07-06T20:01:00Z"],
+    ["Jul 6, 2026 12:00 AM ET", "2026-07-06T04:00:00Z"],
+    ["Jul 6, 2026 12:00 PM ET", "2026-07-06T16:00:00Z"],
+    ["Nov 1, 2026 1:30 AM ET", null], // two possible instants
+    ["Mar 8, 2026 2:30 AM ET", null], // nonexistent local time
+    ["Nov 3, 2026", null], ["Nov 3, 2026 4:39 AM", null],
+    ["Nov 3, 2026 13:39 AM ET", null], ["Nov 3, 2026 4:99 AM ET", null],
+  ]) {
+    await withFetch(async () => Response.json({ data: { symbol: "AAPL", primaryData: { lastSalePrice: "$100", lastTradeTimestamp: text } } }), async () => {
+      const quote = await nasdaq.fetchVerifiedQuote("AAPL");
+      assert.equal(quote.timestamp, iso ? Date.parse(iso) / 1000 : null);
+      assert.equal(quote.asOf, text);
+    });
+  }
+});

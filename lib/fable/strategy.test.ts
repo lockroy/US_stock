@@ -191,3 +191,14 @@ test("known fundamental failure stays distinct from an unrelated missing valuati
   assert.equal(assessment.fundamental.checks[0].pass, false);
   assert.equal(assessment.fundamental.checks[1].pass, null);
 });
+
+test("same-day future source time cannot authorize entry, even without a pre-parsed timestamp", () => {
+  const bars = history();
+  const result = assessStrategy(score(input()), bars, { ...quote, timestamp: null, asOf: "Oct 16, 2026 4:02 PM ET" }, asOf);
+  assert.equal(result.technical.checks.find(c => c.name === "報價／日線日期")?.pass, null);
+  assert.equal(result.technical.referencePlan, null);
+  assert.equal(result.technical.status, "資料不足");
+  for (const text of ["Nov 1, 2026 1:30 AM ET", "Mar 8, 2026 2:30 AM ET", "Oct 16, 2026 rubbish"]) {
+    assert.equal(quoteDay({ ...quote, timestamp: null, asOf: text }), null);
+  }
+});

@@ -5,6 +5,7 @@
 import type { Candle, Quote, Financials, Valuation, MarketCapSnapshot } from "../types";
 import { validateCandles } from "../indicators/indicators";
 import { financialEnd } from "./sec";
+import { parseQuoteTime } from "../market/quote-time";
 
 export const NASDAQ_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -96,7 +97,7 @@ export async function fetchVerifiedQuote(symbol: string): Promise<Quote> {
       change: parseFinancialNumber(p.netChange),
       changePct: parseFinancialNumber(p.percentageChange),
       volume: volume !== null && volume >= 0 ? volume : null,
-      timestamp: null, // 供應商未提供已核對時區的 epoch，不以讀取時間冒充成交時間。
+      timestamp: parseQuoteTime(p.lastTradeTimestamp)?.timestamp ?? null, // 僅轉換明示 ET 且無歧義的分鐘時間，不以讀取時間補缺。
       asOf: typeof p.lastTradeTimestamp === "string" && p.lastTradeTimestamp.trim() && p.lastTradeTimestamp !== "N/A" ? p.lastTradeTimestamp : null,
       fetchedAt: Math.floor(Date.now() / 1000),
       isRealTime,
