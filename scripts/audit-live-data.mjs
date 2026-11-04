@@ -28,14 +28,25 @@ import { resolve } from 'node:path';
         if (r.quote?.symbol?.replace(/^US\./, '') !== symbol) failures.push('Wrong stock returned');
         if (r.strategy?.technical?.status === '符合入場條件' && r.strategy.technical.checks.some(c => c.pass !== true)) failures.push('Entry allowed with unresolved checks');
         if (r.candlesIntraday?.length && r.sources.candlesIntraday === 'unknown') failures.push('Intraday candles without source');
+        const expectedDailyDate = r.timing?.calendar?.expectedLastClosedDay ?? null;
+        const actualDailyDate = r.timing?.lastClosedDailyDate ?? null;
+        const dailyFreshness = expectedDailyDate && actualDailyDate
+          ? (expectedDailyDate === actualDailyDate ? 'aligned_with_reference_calendar' : 'not_aligned') : 'unknown';
+        const findings = [];
+        if (dailyFreshness !== 'aligned_with_reference_calendar') {
+          findings.push('Daily history is not confirmed current');
+          if (r.plan != null || r.strategy?.technical?.referencePlan != null || r.strategy?.technical?.status === '符合入場條件') failures.push('Current entry plan exposed without current daily history');
+        }
+        if (r.marketCap?.value != null && r.marketCap.asOf == null) findings.push('Market-cap update time unknown');
+        if (r.comparability?.priceAdjustment !== 'verified') findings.push('Price adjustment not verified');
         const checks = r.financials?.statementChecks?.checks ?? [];
-        const row = { symbol, status: response.status, failures, quote: { asOf: r.quote?.asOf, timestamp: r.quote?.timestamp, isRealTime: r.quote?.isRealTime, marketStatus: r.quote?.marketStatus }, timing: r.timing, marketCap: r.marketCap,
+        const row = { symbol, status: response.status, failures, findings, dailyFreshness, quote: { asOf: r.quote?.asOf, timestamp: r.quote?.timestamp, isRealTime: r.quote?.isRealTime, marketStatus: r.quote?.marketStatus }, timing: r.timing, marketCap: r.marketCap,
           priceAdjustment: r.comparability?.priceAdjustment ?? 'unknown', dividendEvents: r.comparability?.dividends?.events?.length ?? 0,
           dividendsComplete: r.comparability?.dividends?.completeness ?? 'unknown', sources: r.sources,
           financialPeriod: r.financials?.periodEnd, epsNote: r.financials?.notes?.epsGrowth,
           statementChecks: checks.map(({key,status,candidates}) => ({key,status,candidates})), technicalStatus: r.strategy?.technical?.status };
         results.reports.push(row);
-        console.log(symbol, JSON.stringify({ status: row.status, failures, quoteDate: r.timing?.quoteDate, dailyDate: r.timing?.lastClosedDailyDate, matched: checks.filter(c => c.status === 'matched').length, total: checks.length }));
+        console.log(symbol, JSON.stringify({ status: row.status, failures, findings, dailyFreshness, expectedDailyDate, technicalStatus: row.technicalStatus, quoteDate: r.timing?.quoteDate, dailyDate: r.timing?.lastClosedDailyDate, matched: checks.filter(c => c.status === 'matched').length, total: checks.length }));
       } catch (error) { results.reports.push({symbol, error: error.message}); console.error(symbol, error.message); }
     }
     writeFileSync(resolve(output, 'summary.json'), JSON.stringify(results, null, 2));
