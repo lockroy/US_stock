@@ -80,8 +80,9 @@ export function SearchBox() {
   }
 
   return (
-    <div ref={boxRef} className="relative w-full max-w-xl">
+    <div ref={boxRef} className="relative w-full">
       <input
+        id="stock-search"
         aria-label="美股代號或公司名稱"
         aria-controls="stock-suggestions"
         aria-expanded={open && state.items.length > 0}
@@ -98,14 +99,15 @@ export function SearchBox() {
             submission.current?.abort(); search.cancel(); setOpen(false); setState({ items: [], loading: false, error: null });
           }
         }}
-        placeholder="輸入美股代號或英文公司名稱，例如 AAPL / Apple"
-        className="w-full rounded-xl border border-line bg-card px-4 py-3 text-txt outline-none focus:border-accent"
+        placeholder="例如 AAPL / Apple"
+        className="search-input w-full rounded-xl border border-line bg-bg pl-4 pr-24 py-4 text-txt outline-none focus:border-accent"
       />
+      <button type="button" onClick={() => void submit()} disabled={!q.trim() || state.loading} className="search-submit absolute right-2 top-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold disabled:opacity-40">{state.loading ? "搜尋中…" : "分析 →"}</button>
       {open && state.items.length > 0 && (
-        <ul id="stock-suggestions" role="listbox" className="absolute z-10 mt-1 w-full rounded-xl border border-line bg-card overflow-hidden">
+        <ul id="stock-suggestions" role="listbox" className="absolute z-20 mt-2 w-full shadow-2xl rounded-xl border border-line bg-card overflow-hidden">
           {state.items.map(it => (
             <li key={it.symbol} role="option" aria-selected={false} className="border-b border-line last:border-0">
-              <button type="button" onClick={() => go(it.symbol)} className="w-full text-left px-4 py-2 hover:bg-[#21262d]">
+              <button type="button" onClick={() => go(it.symbol)} className="w-full text-left px-4 py-2 hover:bg-accent/10 focus-visible:bg-accent/10">
                 <span className="font-semibold">{it.symbol}</span>
                 <span className="ml-2 text-muted text-sm">{it.name}</span>
                 {it.exchange && <span className="ml-2 text-muted text-xs">{it.exchange}</span>}
@@ -114,7 +116,7 @@ export function SearchBox() {
           ))}
         </ul>
       )}
-      {state.loading && <div className="absolute right-3 top-3 text-muted text-xs" role="status">搜尋中…</div>}
+      {state.loading && <div className="sr-only" role="status">搜尋中…</div>}
       {state.error && <div className="text-bad text-sm mt-2" role="alert">{state.error}</div>}
       {state.message && <div className="text-muted text-xs mt-2" role="status">{state.message}</div>}
       {state.mode === "demo" && <div className="text-warn text-xs mt-2">搜尋結果為示範資料。</div>}

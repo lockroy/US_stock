@@ -8,12 +8,12 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: "#0d1117",
-        card: "#161b22",
-        line: "#30363d",
-        txt: "#e6edf3",
-        muted: "#8b949e",
-        accent: "#3b82f6",
+        bg: "#0b1218",
+        card: "#111e28",
+        line: "#263947",
+        txt: "#edf4f8",
+        muted: "#a1b2c1",
+        accent: "#6ddccf",
         futu: "#f59e0b",
         fable: "#a855f7",
         ok: "#22c55e",

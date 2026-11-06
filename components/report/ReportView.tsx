@@ -73,9 +73,9 @@ const FINANCIAL_FIELDS: [keyof Financials, string, string][] = [
 
 function Block({ n, title, fable, children }: { n: number; title: string; fable?: boolean; children: React.ReactNode }) {
   return (
-    <section className="card p-4 mb-4">
+    <section id={`report-section-${n}`} className="card report-block p-5 sm:p-7 mb-5">
       <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
-        <span className="text-accent">{n}.</span>
+        <span className="section-number">{String(n).padStart(2, "0")}</span>
         {title}
         {fable && <span className="text-[10px] bg-fable text-white px-2 py-0.5 rounded-full">Fable</span>}
       </h2>
@@ -115,8 +115,8 @@ function ReportView({ symbol }: { symbol: string }) {
     },
   });
 
-  if (isLoading) return <div className="card p-6 text-muted">載入報告中…</div>;
-  if (isError || !data) return <div className="card p-6 text-bad">{error instanceof Error ? error.message : "暫時無法取得報告，請稍後再試。"}</div>;
+  if (isLoading) return <div className="card p-8 text-muted" role="status"><span className="loading-dot" />載入報告中…<p className="mt-3 text-xs">正在讀取行情、財務及資料來源。</p></div>;
+  if (isError || !data) return <div className="card p-6 text-bad" role="alert">{error instanceof Error ? error.message : "暫時無法取得報告，請稍後再試。"}</div>;
 
   const r = data;
   const newsTicker = normalizeTicker(r.quote.symbol);
@@ -125,16 +125,21 @@ function ReportView({ symbol }: { symbol: string }) {
   const color = tierColor(r.score.tier);
 
   return (
-    <div>
+    <div className="report-content">
+      <div className="flex items-center justify-between gap-3 my-5"><div><p className="eyebrow">STOCK RESEARCH / 個股研究</p><h1 className="text-2xl font-semibold mt-2">{r.quote.symbol} 研究報告</h1></div><span className="text-xs text-muted border border-line rounded-full px-3 py-1">{r.mode === "demo" ? "示範資料" : "公開來源資料"}</span></div>
+      <nav aria-label="報告章節" className="report-nav mb-5">
+        {[ [1, "行情"], [2, "評分"], [6, "交易條件"], [9, "價格圖"], [3, "財務細項"] ].map(([n, label]) => <a key={n} href={`#report-section-${n}`}>{label}</a>)}
+        <a href="#data-quality">資料缺項</a>
+      </nav>
       {r.mode === "demo" && <div className="card p-4 mb-4 text-warn">示範模式：報價、財務、估值、評級與新聞為模擬資料，不能視為真實投資依據。</div>}
       {/* 1 報價頭 */}
-      <Block n={1} title="報價頭">
+      <Block n={1} title="行情概覽">
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <div className="text-xl font-bold">{r.quote.symbol}</div>
             <div className="text-muted text-sm">{r.quote.name}</div>
           </div>
-          <div className="text-3xl font-bold">${r.quote.lastPrice.toFixed(2)}</div>
+          <div className="text-4xl sm:text-5xl font-semibold tracking-tight tabular-nums">${r.quote.lastPrice.toFixed(2)}</div>
           <div className={r.quote.change === null ? "text-muted" : up ? "text-ok" : "text-bad"}>
             {r.quote.change === null ? "漲跌未知" : `${up ? "+" : ""}${r.quote.change.toFixed(2)}`} ({r.quote.changePct === null ? "百分比未知" : `${r.quote.changePct >= 0 ? "+" : ""}${r.quote.changePct.toFixed(2)}%`})
           </div>
@@ -179,6 +184,11 @@ function ReportView({ symbol }: { symbol: string }) {
         )}
       </Block>
 
+      <div className="research-overview grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5" aria-label="研究摘要">
+        <div className="card p-5"><p className="text-xs text-muted">已知項目評分</p><p className="text-3xl font-semibold mt-2 tabular-nums">{r.score.total ?? "未知"}<span className="text-sm text-muted"> / 100</span></p><p className="text-xs text-muted mt-2">部分評估，並非買入指令</p></div>
+        <div className="card p-5"><p className="text-xs text-muted">評分資料覆蓋</p><p className="text-3xl font-semibold mt-2 tabular-nums">{r.score.completeness.percent}<span className="text-sm text-muted"> %</span></p><p className="text-xs text-muted mt-2">按適用權重計算，非準確率</p></div>
+        <div className="card p-5"><p className="text-xs text-muted">當前技術條件</p><p className="text-xl font-semibold mt-3">{r.strategy.technical.status}</p><a href="#report-section-6" className="text-xs inline-block mt-3">查看判斷依據 →</a></div>
+      </div>
       {r.timing && <aside className="card p-4 mb-4 text-sm" data-testid="data-timing">
         <h2 className="font-semibold mb-2">資料時效與交易日曆</h2>
         <div className="space-y-1 text-xs text-muted">
@@ -191,7 +201,7 @@ function ReportView({ symbol }: { symbol: string }) {
           <p className="text-warn">{r.timing.calendar.verification}；臨時停市與交易所最新公告仍需核實。收市時間是參考安排，不保證供應商已完成更新。</p>
         </div>
       </aside>}
-      <MissingDataSummary report={r} />
+      <div id="data-quality"><MissingDataSummary report={r} /></div>
       <ComparabilityPanel report={r} />
 
       {/* 2 評分總覽 */}
@@ -214,6 +224,7 @@ function ReportView({ symbol }: { symbol: string }) {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           {r.score.dimensions.map(d => <div key={d.dimension} className="card p-3 text-sm" data-testid={`dimension-${d.dimension}`}>
+            <div className="h-1 rounded-full bg-line mb-3 overflow-hidden" aria-hidden="true"><div className="h-full bg-accent" style={{ width: `${Math.max(0, Math.min(100, d.coverage))}%` }} /></div>
             <div className="font-semibold">{d.dimension}：{d.score === null ? "未能評估" : `${d.score}/100`}</div>
             <div className="text-muted text-xs mt-1">資料覆蓋 {d.coverage}%（可用／適用權重 {d.availablePoints}/{d.applicablePoints}；原權重 {d.max}）</div>
             {d.notApplicable.length > 0 && <div className="text-xs text-muted mt-1">不適用：{d.notApplicable.join("、")}（不當零分）</div>}

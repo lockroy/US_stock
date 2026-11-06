@@ -375,7 +375,7 @@ test("Google news displays its publisher, time, source badge and safe external l
 });
 
 async function reportReady(page: Page) {
-  await expect(page.getByRole("heading", { name: /報價頭/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /行情概覽/ })).toBeVisible();
   await expect(page.locator("section")).toHaveCount(11);
 }
 async function noOverflow(page: Page) {
@@ -478,7 +478,7 @@ test("search suggestion opens report, both charts paint candles, and layouts sta
   await reportReady(page);
   if (info.project.name.startsWith("demo")) await expect(page.getByText(/示範模式：報價/)).toBeVisible();
   else await expect(page.getByText(/新聞·(?:Google News RSS|未知 \/ 未取得)/)).toBeVisible();
-  for (const title of [/買入理由區/, /^10\.\s*日線圖/]) {
+  for (const title of [/買入理由區/, /^10\s*日線圖/]) {
     const chart = page.locator("section").filter({ has: page.getByRole("heading", { name: title }) });
     await expect(chart.locator("canvas").first()).toBeVisible();
     await expect.poll(async () => chart.locator("canvas").evaluateAll(elements => {
@@ -551,7 +551,7 @@ test("clearing or dismissing a pending search cannot reopen old suggestions", as
   await page.getByRole("combobox").fill("AAPL");
   await request;
   await page.getByRole("combobox").fill("");
-  await page.getByRole("heading", { name: "即時美股分析助手" }).click();
+  await page.getByRole("heading", { level: 1 }).click();
   release(); await complete;
   await expect(page.getByRole("listbox")).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveCount(0);

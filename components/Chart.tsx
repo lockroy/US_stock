@@ -14,10 +14,10 @@ export function Chart({ candles, buyPoints, height = 360 }: { candles: Candle[];
     const chart = createChart(ref.current, {
       height,
       width: ref.current.clientWidth,
-      layout: { background: { type: ColorType.Solid, color: "#0d1117" }, textColor: "#8b949e" },
-      grid: { vertLines: { color: "#21262d" }, horzLines: { color: "#21262d" } },
-      timeScale: { borderColor: "#30363d" },
-      rightPriceScale: { borderColor: "#30363d" },
+      layout: { background: { type: ColorType.Solid, color: "#111e28" }, textColor: "#a1b2c1" },
+      grid: { vertLines: { color: "#1b2c38" }, horzLines: { color: "#1b2c38" } },
+      timeScale: { borderColor: "#263947" },
+      rightPriceScale: { borderColor: "#263947" },
     });
     const series = chart.addCandlestickSeries({
       upColor: "#22c55e",

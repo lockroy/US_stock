@@ -185,13 +185,13 @@ Nasdaq summary 的市值讀取明確使用 `cache: no-store`。每次伺服器�
 
 ## 本次版本部署驗收
 
-`/api/version` 應回傳 `release: 2026-11-03-real-data-v2.9`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
+`/api/version` 應回傳 `release: 2026-11-06-real-data-v2.10`、`mode: real`、`newsEnabled: false`。`secConfigured` 只顯示是否有格式正確的聯絡識別，不回傳電郵或憑證，也不代表 SEC 連線已通過。設定需在 Cloudflare 的 Worker `us-stock` → Settings → Variables and Secrets 加入 `SEC_USER_AGENT`（使用已提供的專案名稱及聯絡電郵），並發佈設定；本地 `.env.local` 和雲端環境草稿不會自動傳入正式 Worker。若有 Build variables／Runtime variables 分開選項，需設定到執行環境。
 
 GitHub main 更新可供現有 Cloudflare Git 連線觸發建置，但推送成功不等於部署成功。請以 Cloudflare 部署紀錄及正式網站 `/api/version` 核對；維持 `REAL_DATA=true`、`NEWS_ENABLED=false`，不為完成部署切換成示範資料。
 
 Wrangler 已設定 `keep_vars: true`，保留 Dashboard 管理的執行變數，避免後續 Git 部署刪除 `SEC_USER_AGENT`；程式碼明確宣告的 REAL_DATA／NEWS_ENABLED 仍按此版本設定。
 
-首頁及報告頁頂部顯示明顯的「版本 V2.9」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
+首頁及報告頁頂部顯示明顯的「版本 V2.10」標籤；`lib/version.ts` 為畫面與 `/api/version` 的共用版本來源。
 
 
 ## V2.3：不適用與資料時效
@@ -275,3 +275,10 @@ Nasdaq 明示的美東 ET 時間按 America/New_York 規則轉為 epoch（原文
 ### 資料檔案交接與離線驗收
 
 目前需要的文件、正確申報年份及逐步下載操作見 [資料交接清單](DATA-HANDOFF.md)。備用 CSV 可用 `node scripts/check-history-csv.mjs file.csv AAPL YYYY-MM-DD [real-report.json]` 離線檢查；執行 `node scripts/history-csv.test.mjs` 驗證工具。工具不連網、不改正式數據、不將格式正確當成可正式接入。
+
+
+## V2.10：整體視覺與閱讀動線
+
+首頁改為深色青綠研究工作台，提供明確搜尋按鈕及研究流程說明；移除未保證的即時行情文案，新聞暫停狀態保留。報告加上章節導覽、評分／覆蓋率／技術狀態摘要，統一卡片、表格、圖表及手機排版。缺失資料、來源、策略限制與示範標記仍完整顯示；未更動資料供應商、計分或買點算法。支援鍵盤焦點、跳至內容及減少動態效果偏好。
+
+視覺版本驗收：Cloudflare 正式建置、Lint 通過；既有 UI 套件 108 項通過，4 項因章節標題格式更新而調整定位後補跑通過。另人工檢查桌面／手機截圖、搜尋按鈕、章節跳轉及減少動態效果；未更動評分或資料供應商。
