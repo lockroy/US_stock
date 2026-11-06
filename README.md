@@ -271,3 +271,7 @@ SEC Company Facts 現在除 EPS 外，亦讀取同一公司、同一申報（acc
 Nasdaq 明示的美東 ET 時間按 America/New_York 規則轉為 epoch（原文分鐘精度）；夏令時間重疊／不存在時刻、未明示時區與不合法格式不猜測。來源時間在同日未來亦會暫停入場參考，評分及歷史訊號不變。純日期不補成交時間。
 
 執行 `node scripts/audit-live-data.mjs`，以瀏覽器唯讀驗收 AAPL、MSFT、TSLA、GOOGL、TSM。結果及原始報告儲存在已忽略的 `.playwright/live-data-audit/`，可用 `AUDIT_BASE_URL`、`AUDIT_OUTPUT_DIR` 指定網站／證據目錄；每隻只請求一次，失敗不中止其餘樣本，整體非零退出。來源可讀不等於數字已獨立核實。來源限制及所需原始申報見 [驗收紀錄](SOURCE-AUDIT-2026-11-03.md)。
+
+### 資料檔案交接與離線驗收
+
+目前需要的文件、正確申報年份及逐步下載操作見 [資料交接清單](DATA-HANDOFF.md)。備用 CSV 可用 `node scripts/check-history-csv.mjs file.csv AAPL YYYY-MM-DD [real-report.json]` 離線檢查；執行 `node scripts/history-csv.test.mjs` 驗證工具。工具不連網、不改正式數據、不將格式正確當成可正式接入。
